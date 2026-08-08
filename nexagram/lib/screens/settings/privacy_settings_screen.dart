@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/router/app_routes.dart';
 import '../../services/local_storage_service.dart';
 import '../../theme/theme.dart';
 
@@ -92,7 +94,8 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                       leading: const Icon(Icons.block_rounded),
                       title: const Text('Blocked Users'),
                       trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () {},
+                      onTap: () =>
+                          context.pushNamed(AppRoutes.blockedUsersName),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(left: 56),
