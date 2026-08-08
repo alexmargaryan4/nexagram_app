@@ -37,14 +37,14 @@ class AppTheme {
         AppColors.lightText,
         AppColors.lightSecondaryText,
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
         foregroundColor: AppColors.lightText,
         titleTextStyle: TextStyle(
-          fontFamily: 'SFProDisplay',
+          fontFamily: AppTypography.primaryFontFamily,
           fontSize: 20,
           fontWeight: FontWeight.w700,
           color: AppColors.lightText,
@@ -86,8 +86,8 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          textStyle: const TextStyle(
-            fontFamily: 'SFProDisplay',
+          textStyle: TextStyle(
+            fontFamily: AppTypography.primaryFontFamily,
             fontSize: 17,
             fontWeight: FontWeight.w600,
           ),
@@ -145,14 +145,14 @@ class AppTheme {
         AppColors.darkText,
         AppColors.darkSecondaryText,
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
         foregroundColor: AppColors.darkText,
         titleTextStyle: TextStyle(
-          fontFamily: 'SFProDisplay',
+          fontFamily: AppTypography.primaryFontFamily,
           fontSize: 20,
           fontWeight: FontWeight.w700,
           color: AppColors.darkText,
@@ -194,8 +194,8 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          textStyle: const TextStyle(
-            fontFamily: 'SFProDisplay',
+          textStyle: TextStyle(
+            fontFamily: AppTypography.primaryFontFamily,
             fontSize: 17,
             fontWeight: FontWeight.w600,
           ),

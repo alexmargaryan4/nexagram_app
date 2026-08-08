@@ -4,15 +4,20 @@ import 'app_colors.dart';
 
 /// Typography scale modeled after iOS's SF Pro type ramp.
 ///
-/// We ship SF Pro Display as a bundled font (see pubspec `fonts:` section).
-/// If the asset files are not present (e.g. fresh clone before the designer
-/// drops in licensed font files), we gracefully fall back to Google Fonts'
-/// "Inter", which has very similar metrics, so the app never crashes on
-/// missing font assets.
+/// SF Pro Display is licensed by Apple and isn't bundled in this repo, so we
+/// use Google Fonts' "Inter" everywhere instead, which has very similar
+/// metrics to SF Pro. If licensed SF Pro Display font files are added later
+/// under assets/fonts/ (and declared in pubspec.yaml's `fonts:` section),
+/// change `_primaryFontFamily` back to that family name.
 class AppTypography {
   AppTypography._();
 
-  static const String _primaryFontFamily = 'SFProDisplay';
+  static final String _primaryFontFamily = GoogleFonts.inter().fontFamily!;
+
+  /// Public accessor so other theme files (e.g. AppTheme's AppBar/button
+  /// text styles) stay in sync with the font actually in use, instead of
+  /// hardcoding a font family name that may not be bundled.
+  static String get primaryFontFamily => _primaryFontFamily;
 
   static TextTheme textTheme(Color textColor, Color secondaryTextColor) {
     final TextTheme base = GoogleFonts.interTextTheme();
