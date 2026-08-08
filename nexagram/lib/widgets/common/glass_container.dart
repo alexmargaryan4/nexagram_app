@@ -89,6 +89,33 @@ class GlassContainer extends StatelessWidget {
   }
 }
 
+/// Shows [builder]'s content in a [showModalBottomSheet] with a solid
+/// backing painted *behind* the glass blur.
+///
+/// [GlassContainer]'s [BackdropFilter] needs real, stable pixels behind it
+/// to blur. A bare `showModalBottomSheet(backgroundColor: Colors.transparent)`
+/// only has the modal barrier (and, for a fraction of a frame while the
+/// sheet is still animating in, effectively nothing settled yet) behind
+/// it, which can produce a "blank white panel" — the blur sampling an
+/// unstable/near-blank layer instead of the chat behind it. Painting an
+/// explicit opaque scrim first gives the blur a dependable surface to
+/// work with on every frame, on both platforms.
+Future<T?> showGlassBottomSheet<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool isScrollControlled = false,
+}) {
+  final bool isDark = Theme.of(context).brightness == Brightness.dark;
+  final Color scrim = isDark ? AppColors.darkBackground : AppColors.lightBackground;
+
+  return showModalBottomSheet<T>(
+    context: context,
+    backgroundColor: scrim,
+    isScrollControlled: isScrollControlled,
+    builder: builder,
+  );
+}
+
 /// A single soft, blurred color blob used by [LiquidGlassBackground].
 class _GlassBlob extends StatelessWidget {
   const _GlassBlob({
