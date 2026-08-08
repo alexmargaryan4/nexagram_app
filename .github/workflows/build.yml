@@ -39,73 +39,161 @@ jobs:
 
       - run: flutter pub get
 
-      # Several Flutter plugins in this project's dependency tree
-      # (app_links 6.4.1, record_android 1.5.2, and potentially others
-      # pulled in transitively) ship an android/build.gradle that reads
-      # compileSdk/minSdk/targetSdk off a `project.android.flutter.*`
-      # property. That property was removed by the Android Gradle
-      # Plugin — this project uses AGP 8.7.3 — which is what throws
-      # "Could not get unknown property 'flutter' for extension
-      # 'android'" / "compileSdkVersion is not specified". Individually
+      # Some Flutter plugins in this project's dependency tree (app_links
+      # 6.4.1 is the one that's actually broken CI so far; record_android
+      # and others may follow — this is a known, ongoing issue across the
+      # pub.dev plugin ecosystem, not specific to one package) ship an
+      # android/build.gradle whose `compileSdk`/`minSdkVersion` read off a
+      # `project.android.flutter.*` property that the Flutter Gradle
+      # Plugin used to inject into every subproject. Flutter 3.24+ (this
+      # workflow is pinned to 3.24.5) no longer does that, which is what
+      # throws "Could not get unknown property 'flutter' for extension
+      # 'android'" and "compileSdkVersion is not specified". Individually
       # bumping each affected plugin's pubspec version isn't an option:
-      # the newer releases require a Dart SDK higher than the one
-      # Flutter 3.24.5 ships (this workflow is pinned to that Flutter
-      # version), so `pub get` itself fails before Gradle ever runs.
+      # the newer releases require a Dart SDK higher than the one Flutter
+      # 3.24.5 ships, so `pub get` itself would fail before Gradle ever
+      # runs.
       #
-      # So instead of patching one hardcoded plugin at a time — finding
-      # out about the next broken one only after another failed CI run —
-      # this step scans every android/build.gradle in the pub cache,
-      # and for any file that still references `project.android.flutter.*`
-      # replaces just that file's `android { ... }` block with one that
-      # hardcodes the SDK numbers instead. Everything else in the file
-      # (dependencies, source sets, custom tasks) is left untouched.
-      - name: Patch plugins whose build.gradle references project.android.flutter.*
+      # Rather than matching the exact wording of whatever legacy property
+      # a given plugin happens to read (that's brittle — a different
+      # plugin, or a future version of the same one, could phrase it
+      # differently and silently slip past a hardcoded regex, exactly
+      # what happened before this fix went in), this step scans every
+      # android/build.gradle(.kts) in the pub cache and checks the one
+      # thing that actually matters: whether the file's compileSdk / or
+      # minSdkVersion line (if present) still references the removed
+      # `project.android.flutter.*` (or bare `flutter.`) property, or is
+      # missing outright. Either way, that line is replaced/inserted with
+      # a hardcoded value; every other line in the file — dependencies,
+      # source sets, custom tasks — is left completely untouched. This
+      # also covers android/build.gradle.kts (Kotlin DSL) files using the
+      # equivalent `compileSdk =` / `minSdk =` syntax.
+      - name: Patch plugin build.gradle files with a broken/missing compileSdk or minSdkVersion
         run: |
           shopt -s globstar nullglob
           PATCHED=0
-          for GRADLE_FILE in "$HOME"/.pub-cache/hosted/pub.dev/*/android/build.gradle; do
-            if ! grep -q 'project\.android\.flutter\.' "$GRADLE_FILE"; then
+          for GRADLE_FILE in "$HOME"/.pub-cache/hosted/pub.dev/*/android/build.gradle "$HOME"/.pub-cache/hosted/pub.dev/*/android/build.gradle.kts; do
+            [ -f "$GRADLE_FILE" ] || continue
+
+            # A "broken" reference is a `compileSdk`/`minSdkVersion` (or
+            # `minSdk` in the Kotlin DSL) line whose value reads off the
+            # removed `project.android.flutter.*` / bare `flutter.*`
+            # property — that's the actual bug, independent of the exact
+            # property name used. "Missing entirely" is the other broken
+            # case (AGP 8+ requires compileSdk explicitly).
+            BROKEN_COMPILE_LINE=""
+            if grep -Eq 'compileSdk(Version)?[[:space:]=]' "$GRADLE_FILE"; then
+              BROKEN_COMPILE_LINE=$(grep -E 'compileSdk(Version)?[[:space:]=]' "$GRADLE_FILE" | grep 'project\.android\.flutter\|[^a-zA-Z]flutter\.' | head -1)
+              MISSING_COMPILE=false
+            else
+              MISSING_COMPILE=true
+            fi
+
+            BROKEN_MINSDK_LINE=""
+            if grep -Eq 'minSdk(Version)?[[:space:]=]' "$GRADLE_FILE"; then
+              BROKEN_MINSDK_LINE=$(grep -E 'minSdk(Version)?[[:space:]=]' "$GRADLE_FILE" | grep 'project\.android\.flutter\|[^a-zA-Z]flutter\.' | head -1)
+            fi
+
+            NEEDS_PATCH=false
+            [ "$MISSING_COMPILE" = true ] && NEEDS_PATCH=true
+            [ -n "$BROKEN_COMPILE_LINE" ] && NEEDS_PATCH=true
+            [ -n "$BROKEN_MINSDK_LINE" ] && NEEDS_PATCH=true
+
+            if [ "$NEEDS_PATCH" = false ]; then
               continue
             fi
 
-            PKG_DIR="$(dirname "$GRADLE_FILE")"
-            MANIFEST_FILE="$PKG_DIR/src/main/AndroidManifest.xml"
+            # No `android { ... }` block at all — nothing sensible for us
+            # to patch, skip rather than risk corrupting the file.
+            if ! grep -q 'android[[:space:]]*{' "$GRADLE_FILE"; then
+              continue
+            fi
 
-            echo "=== Found legacy 'project.android.flutter.*' reference in: $GRADLE_FILE ==="
+            echo "=== Patching: $GRADLE_FILE ==="
             echo "--- before ---"
             cat "$GRADLE_FILE"
 
-            NAMESPACE=""
-            if [ -f "$MANIFEST_FILE" ]; then
-              NAMESPACE=$(grep -o 'package="[^"]*"' "$MANIFEST_FILE" | head -1 | sed -e 's/package="//' -e 's/"$//')
-            fi
-            if [ -z "$NAMESPACE" ]; then
-              # Fall back to the Gradle project's own `group` line, which
-              # every one of these plugin build.gradle files declares.
-              NAMESPACE=$(grep -m1 "^group " "$GRADLE_FILE" | sed -e "s/^group *['\"]//" -e "s/['\"].*$//")
-            fi
-            if [ -z "$NAMESPACE" ]; then
-              echo "Could not determine a namespace for $GRADLE_FILE — skipping (leaving file untouched)."
-              continue
-            fi
-            echo "Using namespace: $NAMESPACE"
+            PKG_DIR="$(dirname "$GRADLE_FILE")"
+            MANIFEST_FILE="$PKG_DIR/src/main/AndroidManifest.xml"
+            IS_KTS=false
+            case "$GRADLE_FILE" in
+              *.kts) IS_KTS=true ;;
+            esac
 
-            cat > "$GRADLE_FILE" <<GRADLEEOF
-          group '$NAMESPACE'
-          version '1.0'
-          apply plugin: 'com.android.library'
-          android {
-          namespace '$NAMESPACE'
-          compileSdk 35
-          defaultConfig {
-          minSdkVersion 21
-          }
-          compileOptions {
-          sourceCompatibility JavaVersion.VERSION_17
-          targetCompatibility JavaVersion.VERSION_17
-          }
-          }
-          GRADLEEOF
+            if [ "$IS_KTS" = true ]; then
+              COMPILE_SDK_LINE='    compileSdk = 35'
+              MINSDK_LINE='        minSdk = 21'
+              NAMESPACE_LINE_PREFIX='    namespace = '
+            else
+              COMPILE_SDK_LINE='    compileSdk 35'
+              MINSDK_LINE='        minSdkVersion 21'
+              NAMESPACE_LINE_PREFIX='    namespace '
+            fi
+
+            # Only add a namespace if the file doesn't already declare one
+            # (AGP 8+ requires it; older plugin build.gradle files instead
+            # relied on a `package="..."` attribute in AndroidManifest.xml,
+            # which AGP 8 no longer reads).
+            NEEDS_NAMESPACE=true
+            if grep -Eq '^\s*namespace[[:space:]=]' "$GRADLE_FILE"; then
+              NEEDS_NAMESPACE=false
+            fi
+
+            NAMESPACE=""
+            if [ "$NEEDS_NAMESPACE" = true ]; then
+              if [ -f "$MANIFEST_FILE" ]; then
+                NAMESPACE=$(grep -o 'package="[^"]*"' "$MANIFEST_FILE" | head -1 | sed -e 's/package="//' -e 's/"$//')
+              fi
+              if [ -z "$NAMESPACE" ]; then
+                # Fall back to the Gradle project's own `group` line, which
+                # these plugin build.gradle files conventionally declare.
+                NAMESPACE=$(grep -m1 -E "^\s*group[[:space:]=]" "$GRADLE_FILE" | sed -e "s/^[[:space:]]*group[[:space:]=]*//" -e "s/[\"']//g" -e 's/[[:space:]]*$//')
+              fi
+              if [ -z "$NAMESPACE" ]; then
+                echo "Could not determine a namespace for $GRADLE_FILE — skipping namespace insertion."
+                NEEDS_NAMESPACE=false
+              fi
+            fi
+
+            TMP_FILE="$(mktemp)"
+            awk -v broken_compile="$BROKEN_COMPILE_LINE" \
+                -v broken_minsdk="$BROKEN_MINSDK_LINE" \
+                -v missing_compile="$MISSING_COMPILE" \
+                -v compile_line="$COMPILE_SDK_LINE" \
+                -v minsdk_line="$MINSDK_LINE" \
+                -v add_namespace="$NEEDS_NAMESPACE" \
+                -v ns_prefix="$NAMESPACE_LINE_PREFIX" \
+                -v ns_value="$NAMESPACE" \
+                -v is_kts="$IS_KTS" \
+                '
+                  BEGIN { ns_inserted = 0; compile_inserted = 0 }
+                  {
+                    if (broken_compile != "" && $0 == broken_compile) {
+                      if (add_namespace == "true" && ns_inserted == 0) {
+                        if (is_kts == "true") { print ns_prefix "\"" ns_value "\"" }
+                        else { print ns_prefix "'"'"'" ns_value "'"'"'" }
+                        ns_inserted = 1
+                      }
+                      print compile_line
+                      compile_inserted = 1
+                    } else if (broken_minsdk != "" && $0 == broken_minsdk) {
+                      print minsdk_line
+                    } else {
+                      print
+                      if (missing_compile == "true" && compile_inserted == 0 && $0 ~ /android[[:space:]]*\{/) {
+                        if (add_namespace == "true" && ns_inserted == 0) {
+                          if (is_kts == "true") { print ns_prefix "\"" ns_value "\"" }
+                          else { print ns_prefix "'"'"'" ns_value "'"'"'" }
+                          ns_inserted = 1
+                        }
+                        print compile_line
+                        compile_inserted = 1
+                      }
+                    }
+                  }
+                ' "$GRADLE_FILE" > "$TMP_FILE"
+
+            mv "$TMP_FILE" "$GRADLE_FILE"
 
             echo "--- after ---"
             cat "$GRADLE_FILE"
