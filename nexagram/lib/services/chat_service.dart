@@ -324,6 +324,18 @@ class ChatService {
       case MessageType.voice:
         return '🎤 Voice message';
       case MessageType.system:
+        // `text` may be a SystemMessageCodec-encoded "member added" payload
+        // (control-character marker + packed fields), not human-readable.
+        // The chat-list preview and notifications are viewer-agnostic (one
+        // shared `chats.last_message` value for everyone), so we can't pick
+        // the per-viewer phrasing [MessageBubble] uses — fall back to a
+        // neutral, always-correct summary instead of leaking the raw
+        // encoded bytes into the UI.
+        final MemberAddedEvent? event =
+            SystemMessageCodec.decodeMemberAdded(text);
+        if (event != null) {
+          return '${event.addedName} added to the group';
+        }
         return text;
       case MessageType.text:
         return text;
