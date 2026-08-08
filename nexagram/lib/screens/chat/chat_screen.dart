@@ -229,9 +229,8 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
   }
 
   void _showAttachSheet() {
-    showModalBottomSheet<void>(
+    showGlassBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (context) => _AttachSheet(
         onGallery: () {
           Navigator.pop(context);
@@ -250,9 +249,8 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
   }
 
   void _showMessageActions(MessageModel message, bool isMe) {
-    showModalBottomSheet<void>(
+    showGlassBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (context) {
         final ChatProvider provider = context.read<ChatProvider>();
         return Padding(
