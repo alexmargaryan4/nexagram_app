@@ -1,26 +1,31 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
-import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart';
 import 'services/notification_service.dart';
+import 'supabase_options.dart';
 import 'theme/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  // The entire backend — Auth, database, Storage, and Realtime — runs on
+  // Supabase. See lib/supabase_options.dart for how credentials are
+  // supplied via --dart-define.
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.anonKey,
   );
 
-  // Sets up the local-notification plugin, Android notification channel,
-  // and foreground/background FCM listeners before the first frame, so no
-  // message arriving right after launch is missed.
+  // Sets up the local-notification plugin and Android notification
+  // channel before the first frame, so no message arriving right after
+  // launch is missed. The Realtime subscription that actually triggers
+  // these is started per-session by AuthProvider once a user signs in.
   await NotificationService().initialize();
 
   runApp(const NexaGramApp());
