@@ -67,17 +67,24 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  assets:
-    - assets/images/
-    - assets/animations/
-
-  fonts:
-    - family: SFProDisplay
-      fonts:
-        - asset: assets/fonts/SFProDisplay-Regular.ttf
-        - asset: assets/fonts/SFProDisplay-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/SFProDisplay-Semibold.ttf
-          weight: 600
-        - asset: assets/fonts/SFProDisplay-Bold.ttf
-          weight: 700
+  # NOTE: the `assets/images`, `assets/animations`, and bundled `SFProDisplay`
+  # font files referenced here previously do not exist anywhere in this repo.
+  # Flutter/Xcode fail the build outright when a declared asset directory or
+  # font file is missing (this is what broke both the Android and iOS CI
+  # builds). Once real files are added under assets/images/, assets/animations/,
+  # and assets/fonts/, uncomment the relevant lines below.
+  #
+  # assets:
+  #   - assets/images/
+  #   - assets/animations/
+  #
+  # fonts:
+  #   - family: SFProDisplay
+  #     fonts:
+  #       - asset: assets/fonts/SFProDisplay-Regular.ttf
+  #       - asset: assets/fonts/SFProDisplay-Medium.ttf
+  #         weight: 500
+  #       - asset: assets/fonts/SFProDisplay-Semibold.ttf
+  #         weight: 600
+  #       - asset: assets/fonts/SFProDisplay-Bold.ttf
+  #         weight: 700
