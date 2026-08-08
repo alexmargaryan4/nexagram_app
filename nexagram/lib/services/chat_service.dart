@@ -150,7 +150,25 @@ class ChatService {
     await _chats.update(updates).eq('id', chatId);
   }
 
-  Future<void> addGroupMember(String chatId, String uid) async {
+  /// Adds [uid] to the group and drops a system message into the chat so
+  /// existing members see how the new person joined.
+  ///
+  /// The stored text is a small encoded payload (see
+  /// [SystemMessageCodec.encodeMemberAdded]) rather than a single fixed
+  /// string, because who gets credited differs by who is reading it:
+  /// - The person who was just added sees "{adderName} added you to the
+  ///   group".
+  /// - Everyone else sees "{addedName} joined the group".
+  /// [MessageBubble] decodes and picks the right phrasing per-viewer at
+  /// render time; this keeps a single row/event in `public.messages`
+  /// instead of writing one differently-worded system message per member.
+  Future<void> addGroupMember(
+    String chatId,
+    String uid, {
+    String? addedByUid,
+    String? addedByName,
+    String? newMemberName,
+  }) async {
     final chat = await getChat(chatId);
     if (chat == null) return;
     final participants = {...chat.participantIds, uid}.toList();
@@ -159,6 +177,25 @@ class ChatService {
       'participant_ids': participants,
       'unread_counts': unread,
     }).eq('id', chatId);
+
+    if (addedByUid != null && addedByName != null && newMemberName != null) {
+      try {
+        await sendMessage(
+          chatId: chatId,
+          senderId: addedByUid,
+          type: MessageType.system,
+          text: SystemMessageCodec.encodeMemberAdded(
+            adderUid: addedByUid,
+            adderName: addedByName,
+            addedUid: uid,
+            addedName: newMemberName,
+          ),
+          participantIds: participants,
+        );
+      } catch (_) {
+        // A missing system message is not worth failing the add for.
+      }
+    }
   }
 
   Future<void> removeGroupMember(String chatId, String uid) async {
