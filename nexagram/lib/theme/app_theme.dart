@@ -51,7 +51,7 @@ class AppTheme {
         ),
       ),
       iconTheme: const IconThemeData(color: AppColors.lightText),
-      cardTheme: CardThemeData(
+      cardTheme: CardTheme(
         color: AppColors.lightSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -97,7 +97,7 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      dialogTheme: DialogThemeData(
+      dialogTheme: DialogTheme(
         backgroundColor: AppColors.lightSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_radius),
@@ -159,7 +159,7 @@ class AppTheme {
         ),
       ),
       iconTheme: const IconThemeData(color: AppColors.darkText),
-      cardTheme: CardThemeData(
+      cardTheme: CardTheme(
         color: AppColors.darkSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -205,7 +205,7 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      dialogTheme: DialogThemeData(
+      dialogTheme: DialogTheme(
         backgroundColor: AppColors.darkSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_radius),
