@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -256,7 +257,16 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
                       _ActionTile(
                         icon: Icons.copy_rounded,
                         label: 'Copy',
-                        onTap: () => Navigator.pop(context),
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await Clipboard.setData(
+                            ClipboardData(text: message.text),
+                          );
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Message copied.')),
+                          );
+                        },
                       ),
                     if (isMe && !message.isDeleted)
                       _ActionTile(
