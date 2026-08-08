@@ -122,6 +122,14 @@ class _GlassBlob extends StatelessWidget {
 /// A full-bleed, slowly drifting gradient backdrop used behind glass panels
 /// on the splash, auth, and empty-state screens — this is what gives the
 /// glass panels something colorful to actually refract.
+///
+/// The screens placed on top of this background (splash, login, register)
+/// use hardcoded white text, so this backdrop is deliberately kept dark and
+/// saturated in *both* themes — unlike the rest of the app it does not
+/// lighten up in light mode. Letting it turn pale in light mode is what
+/// used to make white text on the auth screens nearly unreadable; a dark
+/// scrim underneath the color blobs keeps contrast high regardless of the
+/// active [ThemeMode].
 class LiquidGlassBackground extends StatefulWidget {
   const LiquidGlassBackground({super.key, this.child});
 
@@ -146,15 +154,14 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
 
   @override
   Widget build(BuildContext context) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Stack(
       fit: StackFit.expand,
       children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
-          ),
+        // Deliberately a fixed dark base (not theme-dependent) so the
+        // white text/icons used throughout the auth flow stay legible
+        // whether the app is in light or dark mode.
+        const DecoratedBox(
+          decoration: BoxDecoration(color: Color(0xFF0B1220)),
         ),
         AnimatedBuilder(
           animation: _controller,
@@ -166,13 +173,13 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
                   color: AppColors.brandGradient[0],
                   alignment: Alignment(0.9 * math.cos(t), -0.8 * math.sin(t)),
                   size: 340,
-                  opacity: isDark ? 0.35 : 0.45,
+                  opacity: 0.55,
                 ),
                 _GlassBlob(
                   color: AppColors.brandGradient[2],
                   alignment: Alignment(-0.8 * math.sin(t), 0.9 * math.cos(t)),
                   size: 300,
-                  opacity: isDark ? 0.30 : 0.40,
+                  opacity: 0.50,
                 ),
                 _GlassBlob(
                   color: AppColors.brandGradient[1],
@@ -181,7 +188,7 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
                     0.7 * math.sin(t + 1.5),
                   ),
                   size: 260,
-                  opacity: isDark ? 0.28 : 0.35,
+                  opacity: 0.45,
                 ),
               ],
             );
@@ -191,6 +198,13 @@ class _LiquidGlassBackgroundState extends State<LiquidGlassBackground>
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
             child: const SizedBox.expand(),
+          ),
+        ),
+        // Soft dark scrim on top of the blurred blobs so white text/icons
+        // keep enough contrast even over the brightest part of the blur.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.28),
           ),
         ),
         if (widget.child != null) widget.child!,
