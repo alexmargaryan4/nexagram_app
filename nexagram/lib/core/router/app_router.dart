@@ -8,6 +8,7 @@ import '../../screens/main_shell.dart';
 import '../../screens/profile/edit_profile_screen.dart';
 import '../../screens/profile/profile_screen.dart';
 import '../../screens/profile/user_profile_screen.dart';
+import '../../screens/settings/blocked_users_screen.dart';
 import '../../screens/settings/notification_settings_screen.dart';
 import '../../screens/settings/privacy_settings_screen.dart';
 import '../../screens/settings/settings_screen.dart';
@@ -93,6 +94,13 @@ GoRouter buildAppRouter(AuthProvider authProvider) {
             path: 'privacy',
             name: AppRoutes.privacySettingsName,
             builder: (context, state) => const PrivacySettingsScreen(),
+            routes: [
+              GoRoute(
+                path: 'blocked',
+                name: AppRoutes.blockedUsersName,
+                builder: (context, state) => const BlockedUsersScreen(),
+              ),
+            ],
           ),
           GoRoute(
             path: 'notifications',
