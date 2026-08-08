@@ -1,10 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
-/// Ephemeral typing indicator, stored at `chats/{chatId}/typing/{uid}`.
+/// Ephemeral typing indicator, stored at `public.typing_status` in
+/// Supabase Postgres (composite key `(chat_id, user_id)`, replacing the
+/// old `chats/{chatId}/typing/{uid}` sub-collection).
 ///
-/// Documents are written with a short TTL semantics: the client refreshes
-/// [updatedAt] every keystroke (debounced) and clears the doc when the user
+/// Rows are written with a short TTL semantics: the client refreshes
+/// [updatedAt] every keystroke (debounced) and clears the row when the user
 /// stops typing or sends the message. Readers additionally treat any
 /// timestamp older than [AppConstants.typingTimeout] as stale, guarding
 /// against a client that disconnected mid-type.
@@ -19,25 +20,14 @@ class TypingStatusModel extends Equatable {
   final bool isTyping;
   final DateTime? updatedAt;
 
-  factory TypingStatusModel.fromMap(Map<String, dynamic> map, String uid) {
+  factory TypingStatusModel.fromMap(Map<String, dynamic> map) {
     return TypingStatusModel(
-      uid: uid,
-      isTyping: (map['isTyping'] as bool?) ?? false,
-      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate(),
+      uid: map['user_id'] as String,
+      isTyping: (map['is_typing'] as bool?) ?? false,
+      updatedAt: map['updated_at'] != null
+          ? DateTime.parse(map['updated_at'] as String).toLocal()
+          : null,
     );
-  }
-
-  factory TypingStatusModel.fromDoc(
-    DocumentSnapshot<Map<String, dynamic>> doc,
-  ) {
-    return TypingStatusModel.fromMap(doc.data() ?? {}, doc.id);
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'isTyping': isTyping,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
   }
 
   bool get isStale {
