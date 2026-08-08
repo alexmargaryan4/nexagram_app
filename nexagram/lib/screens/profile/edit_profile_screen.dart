@@ -19,7 +19,7 @@ import '../../widgets/common/user_avatar.dart';
 ///
 /// Username and email are intentionally not editable here: username
 /// changes would require re-running the uniqueness reservation dance in
-/// [AuthService.register], and email changes need Firebase Auth
+/// [AuthService.register], and email changes need Supabase Auth
 /// re-verification — both are bigger flows than this screen's scope.
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
