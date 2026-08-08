@@ -1,13 +1,13 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
-/// A saved contact relationship, stored at
-/// `users/{ownerUid}/contacts/{contactUid}`.
+/// A saved contact relationship, stored at `public.contacts` in Supabase
+/// Postgres (`owner_uid` + `contact_uid` composite primary key, replacing
+/// the old `users/{ownerUid}/contacts/{contactUid}` sub-collection).
 ///
 /// We keep this as a thin pointer + denormalized display fields rather than
 /// duplicating the full [UserModel], so contact list rendering doesn't
 /// require a join, but the source of truth for profile edits stays on the
-/// `users/{uid}` document.
+/// `public.users` row.
 class ContactModel extends Equatable {
   const ContactModel({
     required this.contactUid,
@@ -23,26 +23,24 @@ class ContactModel extends Equatable {
   final String? avatarUrl;
   final DateTime? addedAt;
 
-  factory ContactModel.fromMap(Map<String, dynamic> map, String contactUid) {
+  factory ContactModel.fromMap(Map<String, dynamic> map) {
     return ContactModel(
-      contactUid: contactUid,
+      contactUid: map['contact_uid'] as String,
       username: (map['username'] as String?) ?? '',
       name: (map['name'] as String?) ?? '',
-      avatarUrl: map['avatarUrl'] as String?,
-      addedAt: (map['addedAt'] as Timestamp?)?.toDate(),
+      avatarUrl: map['avatar_url'] as String?,
+      addedAt: map['added_at'] != null
+          ? DateTime.parse(map['added_at'] as String).toLocal()
+          : null,
     );
-  }
-
-  factory ContactModel.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    return ContactModel.fromMap(doc.data() ?? {}, doc.id);
   }
 
   Map<String, dynamic> toMap() {
     return {
+      'contact_uid': contactUid,
       'username': username,
       'name': name,
-      'avatarUrl': avatarUrl,
-      'addedAt': FieldValue.serverTimestamp(),
+      'avatar_url': avatarUrl,
     };
   }
 

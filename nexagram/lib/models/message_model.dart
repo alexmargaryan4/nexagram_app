@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
 /// The kind of payload a [MessageModel] carries.
@@ -6,7 +5,7 @@ enum MessageType { text, image, file, voice, system }
 
 /// Per-recipient delivery lifecycle. For group chats, a message is
 /// considered "read" once every member has read it; the raw per-user
-/// read/delivered maps live in [MessageModel.readBy] / [MessageModel.deliveredTo].
+/// read/delivered lists live in [MessageModel.readBy] / [MessageModel.deliveredTo].
 enum MessageStatus { sending, sent, delivered, read, failed }
 
 MessageType messageTypeFromString(String? value) {
@@ -28,7 +27,9 @@ MessageType messageTypeFromString(String? value) {
 /// A single emoji reaction summary, e.g. {"❤️": ["uid1", "uid2"]}.
 typedef ReactionMap = Map<String, List<String>>;
 
-/// A chat message, stored at `chats/{chatId}/messages/{messageId}`.
+/// A chat message, stored at `public.messages` in Supabase Postgres
+/// (`chat_id` foreign key replaces the old `chats/{chatId}/messages`
+/// sub-collection).
 class MessageModel extends Equatable {
   const MessageModel({
     required this.id,
@@ -74,41 +75,34 @@ class MessageModel extends Equatable {
   final bool isDeleted;
   final MessageStatus status;
 
-  factory MessageModel.fromMap(
-    Map<String, dynamic> map,
-    String id,
-    String chatId,
-  ) {
+  factory MessageModel.fromMap(Map<String, dynamic> map) {
     return MessageModel(
-      id: id,
-      chatId: chatId,
-      senderId: (map['senderId'] as String?) ?? '',
+      id: map['id'] as String,
+      chatId: map['chat_id'] as String,
+      senderId: (map['sender_id'] as String?) ?? '',
       type: messageTypeFromString(map['type'] as String?),
       text: (map['text'] as String?) ?? '',
-      mediaUrl: map['mediaUrl'] as String?,
-      mediaThumbUrl: map['mediaThumbUrl'] as String?,
-      fileName: map['fileName'] as String?,
-      fileSizeBytes: map['fileSizeBytes'] as int?,
-      voiceDurationMs: map['voiceDurationMs'] as int?,
-      createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
-      editedAt: (map['editedAt'] as Timestamp?)?.toDate(),
-      readBy: List<String>.from((map['readBy'] as List<dynamic>?) ?? const []),
+      mediaUrl: map['media_url'] as String?,
+      mediaThumbUrl: map['media_thumb_url'] as String?,
+      fileName: map['file_name'] as String?,
+      fileSizeBytes: map['file_size_bytes'] as int?,
+      voiceDurationMs: map['voice_duration_ms'] as int?,
+      createdAt: map['created_at'] != null
+          ? DateTime.parse(map['created_at'] as String).toLocal()
+          : null,
+      editedAt: map['edited_at'] != null
+          ? DateTime.parse(map['edited_at'] as String).toLocal()
+          : null,
+      readBy: List<String>.from((map['read_by'] as List<dynamic>?) ?? const []),
       deliveredTo:
-          List<String>.from((map['deliveredTo'] as List<dynamic>?) ?? const []),
+          List<String>.from((map['delivered_to'] as List<dynamic>?) ?? const []),
       reactions: _decodeReactions(map['reactions']),
-      replyToMessageId: map['replyToMessageId'] as String?,
-      replyToPreview: map['replyToPreview'] as String?,
-      replyToSenderName: map['replyToSenderName'] as String?,
-      isDeleted: (map['isDeleted'] as bool?) ?? false,
+      replyToMessageId: map['reply_to_message_id'] as String?,
+      replyToPreview: map['reply_to_preview'] as String?,
+      replyToSenderName: map['reply_to_sender_name'] as String?,
+      isDeleted: (map['is_deleted'] as bool?) ?? false,
       status: MessageStatus.sent,
     );
-  }
-
-  factory MessageModel.fromDoc(
-    DocumentSnapshot<Map<String, dynamic>> doc,
-    String chatId,
-  ) {
-    return MessageModel.fromMap(doc.data() ?? {}, doc.id, chatId);
   }
 
   static ReactionMap _decodeReactions(dynamic raw) {
@@ -119,28 +113,6 @@ class MessageModel extends Equatable {
         List<String>.from((value as List<dynamic>?) ?? const []),
       ),
     );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'senderId': senderId,
-      'type': type.name,
-      'text': text,
-      'mediaUrl': mediaUrl,
-      'mediaThumbUrl': mediaThumbUrl,
-      'fileName': fileName,
-      'fileSizeBytes': fileSizeBytes,
-      'voiceDurationMs': voiceDurationMs,
-      'createdAt': FieldValue.serverTimestamp(),
-      'editedAt': editedAt != null ? Timestamp.fromDate(editedAt!) : null,
-      'readBy': readBy,
-      'deliveredTo': deliveredTo,
-      'reactions': reactions,
-      'replyToMessageId': replyToMessageId,
-      'replyToPreview': replyToPreview,
-      'replyToSenderName': replyToSenderName,
-      'isDeleted': isDeleted,
-    };
   }
 
   bool isReadBy(String uid) => readBy.contains(uid);

@@ -1,7 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 
-/// A NexaGram user profile, stored at `users/{uid}` in Firestore.
+/// A NexaGram user profile, stored at `public.users` in Supabase Postgres.
 class UserModel extends Equatable {
   const UserModel({
     required this.uid,
@@ -19,7 +18,7 @@ class UserModel extends Equatable {
   });
 
   final String uid;
-  final String username; // unique, lowercase, used for search / @mentions
+  final String username; // unique, lowercase-indexed, used for search / @mentions
   final String name; // display name
   final String email;
   final String bio;
@@ -31,47 +30,49 @@ class UserModel extends Equatable {
   final List<String> fcmTokens;
   final List<String> blockedUserIds;
 
-  factory UserModel.fromMap(Map<String, dynamic> map, String uid) {
+  /// Builds a [UserModel] from a Supabase row (a `Map<String, dynamic>`
+  /// as returned by `postgrest`/Realtime, using the table's snake_case
+  /// column names).
+  factory UserModel.fromMap(Map<String, dynamic> map) {
     return UserModel(
-      uid: uid,
+      uid: map['id'] as String,
       username: (map['username'] as String?) ?? '',
       name: (map['name'] as String?) ?? '',
       email: (map['email'] as String?) ?? '',
       bio: (map['bio'] as String?) ?? '',
-      phoneNumber: (map['phoneNumber'] as String?) ?? '',
-      avatarUrl: map['avatarUrl'] as String?,
-      isOnline: (map['isOnline'] as bool?) ?? false,
-      lastSeen: (map['lastSeen'] as Timestamp?)?.toDate(),
-      createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
+      phoneNumber: (map['phone_number'] as String?) ?? '',
+      avatarUrl: map['avatar_url'] as String?,
+      isOnline: (map['is_online'] as bool?) ?? false,
+      lastSeen: map['last_seen'] != null
+          ? DateTime.parse(map['last_seen'] as String).toLocal()
+          : null,
+      createdAt: map['created_at'] != null
+          ? DateTime.parse(map['created_at'] as String).toLocal()
+          : null,
       fcmTokens: List<String>.from(
-        (map['fcmTokens'] as List<dynamic>?) ?? const [],
+        (map['fcm_tokens'] as List<dynamic>?) ?? const [],
       ),
       blockedUserIds: List<String>.from(
-        (map['blockedUserIds'] as List<dynamic>?) ?? const [],
+        (map['blocked_user_ids'] as List<dynamic>?) ?? const [],
       ),
     );
   }
 
-  factory UserModel.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    return UserModel.fromMap(doc.data() ?? {}, doc.id);
-  }
-
+  /// Fields for an insert/upsert into `public.users`. `id` is supplied
+  /// separately by the caller (it's the Supabase Auth uid, set once at
+  /// sign-up and never re-sent on updates).
   Map<String, dynamic> toMap() {
     return {
       'username': username,
-      'usernameLower': username.toLowerCase(),
       'name': name,
-      'nameLower': name.toLowerCase(),
       'email': email,
       'bio': bio,
-      'phoneNumber': phoneNumber,
-      'avatarUrl': avatarUrl,
-      'isOnline': isOnline,
-      'lastSeen': lastSeen != null ? Timestamp.fromDate(lastSeen!) : null,
-      'createdAt':
-          createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
-      'fcmTokens': fcmTokens,
-      'blockedUserIds': blockedUserIds,
+      'phone_number': phoneNumber,
+      'avatar_url': avatarUrl,
+      'is_online': isOnline,
+      'last_seen': lastSeen?.toUtc().toIso8601String(),
+      'fcm_tokens': fcmTokens,
+      'blocked_user_ids': blockedUserIds,
     };
   }
 

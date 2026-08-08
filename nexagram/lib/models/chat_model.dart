@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 import 'message_model.dart';
 
@@ -7,7 +6,7 @@ enum ChatType { private, group }
 ChatType chatTypeFromString(String? value) =>
     value == 'group' ? ChatType.group : ChatType.private;
 
-/// A chat/conversation, stored at `chats/{chatId}`.
+/// A chat/conversation, stored at `public.chats` in Supabase Postgres.
 ///
 /// For [ChatType.private] chats, `participantIds` always has exactly two
 /// entries and `id` is deterministically derived from the sorted UIDs so a
@@ -47,55 +46,53 @@ class ChatModel extends Equatable {
   final List<String> mutedBy;
   final List<String> pinnedBy;
 
-  factory ChatModel.fromMap(Map<String, dynamic> map, String id) {
+  factory ChatModel.fromMap(Map<String, dynamic> map) {
     return ChatModel(
-      id: id,
+      id: map['id'] as String,
       type: chatTypeFromString(map['type'] as String?),
       participantIds:
-          List<String>.from((map['participantIds'] as List<dynamic>?) ?? const []),
-      groupName: map['groupName'] as String?,
-      groupAvatarUrl: map['groupAvatarUrl'] as String?,
+          List<String>.from((map['participant_ids'] as List<dynamic>?) ?? const []),
+      groupName: map['group_name'] as String?,
+      groupAvatarUrl: map['group_avatar_url'] as String?,
       groupAdminIds:
-          List<String>.from((map['groupAdminIds'] as List<dynamic>?) ?? const []),
-      lastMessage: map['lastMessage'] as String?,
-      lastMessageSenderId: map['lastMessageSenderId'] as String?,
-      lastMessageType: map['lastMessageType'] != null
-          ? messageTypeFromString(map['lastMessageType'] as String?)
+          List<String>.from((map['group_admin_ids'] as List<dynamic>?) ?? const []),
+      lastMessage: map['last_message'] as String?,
+      lastMessageSenderId: map['last_message_sender_id'] as String?,
+      lastMessageType: map['last_message_type'] != null
+          ? messageTypeFromString(map['last_message_type'] as String?)
           : null,
-      lastMessageAt: (map['lastMessageAt'] as Timestamp?)?.toDate(),
-      unreadCounts: Map<String, int>.from(
-        (map['unreadCounts'] as Map<dynamic, dynamic>?) ?? const {},
-      ),
-      createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
-      createdBy: map['createdBy'] as String?,
-      mutedBy: List<String>.from((map['mutedBy'] as List<dynamic>?) ?? const []),
-      pinnedBy: List<String>.from((map['pinnedBy'] as List<dynamic>?) ?? const []),
+      lastMessageAt: map['last_message_at'] != null
+          ? DateTime.parse(map['last_message_at'] as String).toLocal()
+          : null,
+      unreadCounts: (map['unread_counts'] as Map<String, dynamic>?)?.map(
+            (key, value) => MapEntry(key, (value as num).toInt()),
+          ) ??
+          const {},
+      createdAt: map['created_at'] != null
+          ? DateTime.parse(map['created_at'] as String).toLocal()
+          : null,
+      createdBy: map['created_by'] as String?,
+      mutedBy: List<String>.from((map['muted_by'] as List<dynamic>?) ?? const []),
+      pinnedBy: List<String>.from((map['pinned_by'] as List<dynamic>?) ?? const []),
     );
   }
 
-  factory ChatModel.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    return ChatModel.fromMap(doc.data() ?? {}, doc.id);
-  }
-
+  /// Fields for inserting a new row into `public.chats`. `id` is supplied
+  /// separately by the caller.
   Map<String, dynamic> toMap() {
     return {
       'type': type.name,
-      'participantIds': participantIds,
-      'groupName': groupName,
-      'groupAvatarUrl': groupAvatarUrl,
-      'groupAdminIds': groupAdminIds,
-      'lastMessage': lastMessage,
-      'lastMessageSenderId': lastMessageSenderId,
-      'lastMessageType': lastMessageType?.name,
-      'lastMessageAt': lastMessageAt != null
-          ? Timestamp.fromDate(lastMessageAt!)
-          : FieldValue.serverTimestamp(),
-      'unreadCounts': unreadCounts,
-      'createdAt':
-          createdAt != null ? Timestamp.fromDate(createdAt!) : FieldValue.serverTimestamp(),
-      'createdBy': createdBy,
-      'mutedBy': mutedBy,
-      'pinnedBy': pinnedBy,
+      'participant_ids': participantIds,
+      'group_name': groupName,
+      'group_avatar_url': groupAvatarUrl,
+      'group_admin_ids': groupAdminIds,
+      'last_message': lastMessage,
+      'last_message_sender_id': lastMessageSenderId,
+      'last_message_type': lastMessageType?.name,
+      'unread_counts': unreadCounts,
+      'created_by': createdBy,
+      'muted_by': mutedBy,
+      'pinned_by': pinnedBy,
     };
   }
 
