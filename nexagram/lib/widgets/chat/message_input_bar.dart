@@ -3,6 +3,7 @@ import '../../core/constants/app_constants.dart';
 import '../../models/message_model.dart';
 import '../../theme/theme.dart';
 import '../common/glass_container.dart';
+import 'emoji_picker_sheet.dart';
 
 /// The glass composer pinned to the bottom of [ChatScreen].
 ///
@@ -70,6 +71,39 @@ class _MessageInputBarState extends State<MessageInputBar> {
     _controller.clear();
   }
 
+  void _insertEmoji(String emoji) {
+    final TextSelection selection = _controller.selection;
+    final String text = _controller.text;
+
+    // If the field has no valid cursor position (e.g. it never had focus),
+    // fall back to appending at the end rather than losing the tap.
+    final int insertAt =
+        selection.isValid ? selection.start : text.length;
+    final int removeEnd =
+        selection.isValid ? selection.end : text.length;
+
+    final String newText =
+        text.replaceRange(insertAt, removeEnd, emoji);
+    final int newOffset = insertAt + emoji.length;
+
+    _controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newOffset),
+    );
+    widget.onChanged(newText);
+    if (!_focusNode.hasFocus) _focusNode.requestFocus();
+  }
+
+  void _showEmojiPicker() {
+    FocusScope.of(context).unfocus();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => EmojiPickerSheet(onSelected: _insertEmoji),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
@@ -109,6 +143,14 @@ class _MessageInputBarState extends State<MessageInputBar> {
                         ? AppColors.darkSecondaryText
                         : AppColors.lightSecondaryText,
                     onPressed: widget.onAttachPressed,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.emoji_emotions_outlined),
+                    tooltip: 'Emoji',
+                    color: isDark
+                        ? AppColors.darkSecondaryText
+                        : AppColors.lightSecondaryText,
+                    onPressed: _showEmojiPicker,
                   ),
                   Expanded(
                     child: ConstrainedBox(
