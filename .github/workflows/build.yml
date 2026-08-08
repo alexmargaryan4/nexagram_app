@@ -39,6 +39,65 @@ jobs:
 
       - run: flutter pub get
 
+      # The app_links plugin (pulled in transitively by supabase_flutter
+      # for OAuth deep links) is stuck on version 6.4.1 — every newer
+      # release needs a Dart SDK higher than the one Flutter 3.24.5
+      # ships, so it can't just be bumped in pubspec.yaml. Version
+      # 6.4.1's own android/build.gradle reads compileSdk/minSdk/
+      # targetSdk off a `project.android.flutter.*` property that
+      # doesn't exist on AGP 8.7.3 (this project's AGP version), which
+      # is what throws "Could not get unknown property 'flutter' for
+      # extension 'android'". Rather than guess at that file's exact
+      # existing syntax and risk a patch that silently doesn't match,
+      # we replace it outright with a minimal, self-contained
+      # build.gradle that hardcodes the SDK numbers — this is the
+      # commonly-used workaround for plugins whose Gradle files lag
+      # behind the AGP version. The Java package (com.llfbandit.app_links)
+      # is read from the plugin's own AndroidManifest.xml so the
+      # namespace always matches what's actually there.
+      - name: Patch app_links 6.4.1 build.gradle for AGP 8.7.3
+        run: |
+          PKG_DIR="$HOME/.pub-cache/hosted/pub.dev/app_links-6.4.1/android"
+          GRADLE_FILE="$PKG_DIR/build.gradle"
+          MANIFEST_FILE="$PKG_DIR/src/main/AndroidManifest.xml"
+
+          if [ ! -f "$GRADLE_FILE" ]; then
+            echo "app_links-6.4.1 not found in pub cache (version changed?) — skipping patch."
+            exit 0
+          fi
+
+          echo "Original $GRADLE_FILE:"
+          cat "$GRADLE_FILE"
+
+          NAMESPACE="com.llfbandit.app_links"
+          if [ -f "$MANIFEST_FILE" ]; then
+            FOUND=$(grep -o 'package="[^"]*"' "$MANIFEST_FILE" | head -1 | sed -e 's/package="//' -e 's/"$//')
+            if [ -n "$FOUND" ]; then
+              NAMESPACE="$FOUND"
+            fi
+          fi
+          echo "Using namespace: $NAMESPACE"
+
+          cat > "$GRADLE_FILE" <<GRADLEEOF
+          group 'com.llfbandit.app_links'
+          version '1.0'
+          apply plugin: 'com.android.library'
+          android {
+          namespace '$NAMESPACE'
+          compileSdk 35
+          defaultConfig {
+          minSdkVersion 21
+          }
+          compileOptions {
+          sourceCompatibility JavaVersion.VERSION_17
+          targetCompatibility JavaVersion.VERSION_17
+          }
+          }
+          GRADLEEOF
+
+          echo "Patched $GRADLE_FILE:"
+          cat "$GRADLE_FILE"
+
       - name: Build release APK
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
