@@ -1,8 +1,8 @@
 /// Global, non-secret constants used across the app.
 ///
 /// Keep this file free of environment-specific secrets — those belong in
-/// Firebase config files (`google-services.json` / `GoogleService-Info.plist`)
-/// which are excluded from version control.
+/// `lib/supabase_options.dart`, populated via `--dart-define` at build
+/// time and excluded from anything that would leak a service-role key.
 class AppConstants {
   AppConstants._();
 
@@ -57,22 +57,33 @@ class AppConstants {
   static const String prefLastSeenEnabled = 'pref_last_seen_enabled';
 }
 
-/// Cloud Firestore collection & field names, centralised so a rename never
-/// requires a project-wide find/replace across business logic.
-class FirestoreCollections {
-  FirestoreCollections._();
+/// Supabase Postgres table names, centralised so a rename never requires
+/// a project-wide find/replace across business logic.
+class SupabaseTables {
+  SupabaseTables._();
 
   static const String users = 'users';
   static const String chats = 'chats';
-  static const String messages = 'messages'; // sub-collection of chats
-  static const String contacts = 'contacts'; // sub-collection of users
-  static const String typingStatus = 'typing'; // sub-collection of chats
-  static const String presence = 'presence';
-  static const String usernames = 'usernames'; // uniqueness index
+  static const String messages = 'messages'; // fk: chat_id -> chats.id
+  static const String contacts = 'contacts'; // fk: owner_uid -> users.id
+  static const String typingStatus = 'typing_status'; // fk: chat_id -> chats.id
   static const String reports = 'reports';
 }
 
-/// Firebase Storage path helpers.
+/// Names of the Postgres RPC functions (`supabase_schema.sql`) used for
+/// operations that need atomic/elevated semantics beyond a plain
+/// RLS-scoped table call — the equivalents of the old Firestore
+/// WriteBatch / FieldValue.increment / FieldValue.arrayUnion calls.
+class SupabaseRpc {
+  SupabaseRpc._();
+
+  static const String sendMessage = 'send_message';
+  static const String markChatAsRead = 'mark_chat_as_read';
+  static const String toggleReaction = 'toggle_reaction';
+  static const String searchUsers = 'search_users';
+}
+
+/// Supabase Storage path helpers.
 class StoragePaths {
   StoragePaths._();
 
