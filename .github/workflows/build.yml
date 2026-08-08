@@ -9,6 +9,10 @@ on:
 
 env:
   FLUTTER_VERSION: "3.24.5"
+  # The Flutter project (pubspec.yaml etc.) lives in a subfolder of the
+  # repo, not at the repo root — every `run:` step below needs to execute
+  # from here, set via `defaults.run.working-directory` on each job.
+  PROJECT_DIR: nexagram
 
 jobs:
   # ---------------------------------------------------------------------
@@ -16,6 +20,9 @@ jobs:
   # ---------------------------------------------------------------------
   build-android:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.PROJECT_DIR }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,13 +52,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nexagram-android-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
 
   # ---------------------------------------------------------------------
   # iOS — unsigned .ipa (you sign it yourself afterwards with eSign)
   # ---------------------------------------------------------------------
   build-ios:
     runs-on: macos-14
+    defaults:
+      run:
+        working-directory: ${{ env.PROJECT_DIR }}
     steps:
       - uses: actions/checkout@v4
 
@@ -86,4 +96,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nexagram-ios-unsigned-ipa
-          path: nexagram-unsigned.ipa
+          path: ${{ env.PROJECT_DIR }}/nexagram-unsigned.ipa
