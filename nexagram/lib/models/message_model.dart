@@ -24,6 +24,74 @@ MessageType messageTypeFromString(String? value) {
   }
 }
 
+/// Encodes/decodes the small structured payload stored in
+/// [MessageModel.text] for [MessageType.system] "member added" events.
+///
+/// Who gets credited in a "so-and-so added so-and-so" system message
+/// depends on who's reading it (the person just added sees "{adder} added
+/// you", everyone else sees "{added} joined"), but `public.messages` only
+/// stores one row per event. Rather than adding a dedicated column (which
+/// would need a schema migration this app can't safely run for the user),
+/// the four pieces of data the two phrasings need — both uids and both
+/// display names — are packed into `text` behind a private-use marker
+/// that ordinary message text will never contain, and unpacked again by
+/// [MessageBubble] at render time. If a text can't be decoded (e.g. an
+/// older/plain system message), callers should just display it as-is.
+class SystemMessageCodec {
+  SystemMessageCodec._();
+
+  static const String _marker = '\u0002MEMBER_ADDED\u0002';
+  static const String _sep = '\u0003';
+
+  static String encodeMemberAdded({
+    required String adderUid,
+    required String adderName,
+    required String addedUid,
+    required String addedName,
+  }) {
+    return '$_marker$adderUid$_sep$adderName$_sep$addedUid$_sep$addedName';
+  }
+
+  /// Returns the decoded payload, or null if [text] isn't one of these
+  /// encoded "member added" events.
+  static MemberAddedEvent? decodeMemberAdded(String text) {
+    if (!text.startsWith(_marker)) return null;
+    final List<String> parts = text.substring(_marker.length).split(_sep);
+    if (parts.length != 4) return null;
+    return MemberAddedEvent(
+      adderUid: parts[0],
+      adderName: parts[1],
+      addedUid: parts[2],
+      addedName: parts[3],
+    );
+  }
+
+  /// Renders the correct phrasing for [viewerUid]. Falls back to a generic
+  /// join message if the event can't be decoded.
+  static String displayTextFor(String text, String viewerUid) {
+    final MemberAddedEvent? event = decodeMemberAdded(text);
+    if (event == null) return text;
+    if (viewerUid == event.addedUid) {
+      return '${event.adderName} added you to the group';
+    }
+    return '${event.addedName} joined the group';
+  }
+}
+
+class MemberAddedEvent {
+  const MemberAddedEvent({
+    required this.adderUid,
+    required this.adderName,
+    required this.addedUid,
+    required this.addedName,
+  });
+
+  final String adderUid;
+  final String adderName;
+  final String addedUid;
+  final String addedName;
+}
+
 /// A single emoji reaction summary, e.g. {"❤️": ["uid1", "uid2"]}.
 typedef ReactionMap = Map<String, List<String>>;
 
