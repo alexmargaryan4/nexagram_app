@@ -1,0 +1,189 @@
+name: Build APK & unsigned IPA
+
+# Runs on every push to main, and can also be triggered manually from the
+# GitHub app (Actions tab -> this workflow -> "Run workflow").
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_firebase:
+        description: "Also deploy Firestore rules/indexes + Cloud Functions"
+        type: boolean
+        default: false
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Regenerate lib/firebase_options.dart, android/app/google-services.json
+  # and ios/Runner/GoogleService-Info.plist from your Firebase project,
+  # using the FIREBASE_TOKEN secret. Both build jobs below download this
+  # as an artifact so they stay in sync.
+  # ---------------------------------------------------------------------
+  firebase-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install Node (for firebase-tools)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase CLI + FlutterFire CLI
+        run: |
+          npm install -g firebase-tools
+          dart pub global activate flutterfire_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: flutterfire configure
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          flutterfire configure \
+            --project="${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --platforms=android,ios \
+            --android-package-name=com.nexagram.app \
+            --ios-bundle-id=com.nexagram.app \
+            --yes
+
+      - name: Upload generated Firebase config
+        uses: actions/upload-artifact@v4
+        with:
+          name: firebase-config
+          path: |
+            lib/firebase_options.dart
+            android/app/google-services.json
+            ios/Runner/GoogleService-Info.plist
+          retention-days: 1
+
+  # ---------------------------------------------------------------------
+  # Android APK
+  # ---------------------------------------------------------------------
+  build-android:
+    needs: firebase-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Java (needed for Gradle)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download Firebase config
+        uses: actions/download-artifact@v4
+        with:
+          name: firebase-config
+
+      - run: flutter pub get
+
+      - name: Build release APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexagram-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  # ---------------------------------------------------------------------
+  # iOS — unsigned .ipa (you sign it yourself afterwards with eSign)
+  # ---------------------------------------------------------------------
+  build-ios:
+    needs: firebase-config
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Download Firebase config
+        uses: actions/download-artifact@v4
+        with:
+          name: firebase-config
+
+      - run: flutter pub get
+
+      - name: Build unsigned iOS app
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      # flutter build ipa always wants a signing team, which we don't have
+      # in CI. So we build the plain .app bundle above and pack it into
+      # the Payload/ folder structure that makes a valid, unsigned .ipa
+      # by hand — this is the same structure eSign / AltStore expect
+      # before you sign it.
+      - name: Package unsigned .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -r nexagram-unsigned.ipa Payload
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexagram-ios-unsigned-ipa
+          path: nexagram-unsigned.ipa
+
+  # ---------------------------------------------------------------------
+  # Deploys firestore.rules / firestore.indexes.json and the two Cloud
+  # Functions. (Supabase Storage policies are NOT deployed here — they're
+  # a one-time SQL script you run by hand in the Supabase dashboard, see
+  # supabase_storage_policy.sql.) Does NOT run automatically — trigger it
+  # by hand from Actions -> "Build APK & unsigned IPA" -> Run workflow ->
+  # tick "deploy_firebase". Keeps every push from redeploying your
+  # backend by accident.
+  # ---------------------------------------------------------------------
+  deploy-firebase-backend:
+    if: github.event.inputs.deploy_firebase == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Install functions dependencies
+        run: npm install
+        working-directory: functions
+
+      - name: Deploy rules, indexes, functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          firebase deploy \
+            --project="${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --only firestore:rules,firestore:indexes,functions \
+            --token "$FIREBASE_TOKEN"
