@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart';
+import 'services/notification_service.dart';
 import 'theme/theme.dart';
 
 Future<void> main() async {
@@ -15,6 +17,11 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Sets up the local-notification plugin, Android notification channel,
+  // and foreground/background FCM listeners before the first frame, so no
+  // message arriving right after launch is missed.
+  await NotificationService().initialize();
 
   runApp(const NexaGramApp());
 }
