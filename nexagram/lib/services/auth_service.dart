@@ -1,57 +1,74 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../core/constants/app_constants.dart';
 import '../core/errors/app_exception.dart';
 import '../models/user_model.dart';
 
-/// Thin wrapper around [FirebaseAuth] that also provisions the matching
-/// Firestore `users/{uid}` profile document on sign-up.
+/// Thin wrapper around Supabase Auth (GoTrue) that also provisions the
+/// matching `public.users` profile row on sign-up.
 ///
-/// Every method translates raw [FirebaseAuthException]s into our own
-/// [AuthException] so the UI layer never has to know about Firebase types.
+/// Every method translates raw [sb.AuthException]s into our own
+/// [AuthException] so the UI layer never has to know about Supabase types.
+///
+/// Username uniqueness used to be enforced with a separate Firestore
+/// `usernames/{usernameLower}` reservation document written atomically
+/// alongside the profile in a `WriteBatch`. Postgres does this more simply:
+/// `public.users.username_lower` has a unique index (see
+/// `supabase_schema.sql`), so a duplicate insert fails server-side with a
+/// `23505` error regardless of any client-side race — [_assertUsernameAvailable]
+/// below is just a fast pre-check for a friendlier error message before we
+/// ever create the Auth account.
 class AuthService {
-  AuthService({
-    FirebaseAuth? firebaseAuth,
-    FirebaseFirestore? firestore,
-  })  : _auth = firebaseAuth ?? FirebaseAuth.instance,
-        _firestore = firestore ?? FirebaseFirestore.instance;
+  AuthService({sb.SupabaseClient? client})
+      : _client = client ?? sb.Supabase.instance.client;
 
-  final FirebaseAuth _auth;
-  final FirebaseFirestore _firestore;
+  final sb.SupabaseClient _client;
 
-  User? get currentFirebaseUser => _auth.currentUser;
+  sb.GoTrueClient get _auth => _client.auth;
 
-  String? get currentUid => _auth.currentUser?.uid;
+  sb.User? get currentSupabaseUser => _auth.currentUser;
+
+  String? get currentUid => _auth.currentUser?.id;
 
   bool get isSignedIn => _auth.currentUser != null;
 
-  /// Emits whenever the Firebase auth state changes (sign in / sign out).
-  Stream<User?> authStateChanges() => _auth.authStateChanges();
+  /// Emits the current Supabase user whenever auth state changes (sign in,
+  /// sign out, token refresh). Mirrors the old Firebase
+  /// `authStateChanges()` shape so [AuthProvider] didn't need to change.
+  Stream<sb.User?> authStateChanges() =>
+      _auth.onAuthStateChange.map((state) => state.session?.user);
 
   Future<UserModel> signIn({
     required String email,
     required String password,
   }) async {
     try {
-      final UserCredential credential = await _auth.signInWithEmailAndPassword(
+      final sb.AuthResponse response = await _auth.signInWithPassword(
         email: email.trim(),
         password: password,
       );
-      final User user = credential.user!;
-      final DocumentSnapshot<Map<String, dynamic>> doc = await _firestore
-          .collection(FirestoreCollections.users)
-          .doc(user.uid)
-          .get();
+      final sb.User? user = response.user;
+      if (user == null) {
+        throw const AuthException(
+          'Incorrect email or password.',
+          code: 'invalid-credentials',
+        );
+      }
 
-      if (!doc.exists) {
+      final Map<String, dynamic>? row = await _client
+          .from(SupabaseTables.users)
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (row == null) {
         throw const AuthException(
           'User profile not found. Please contact support.',
           code: 'profile-missing',
         );
       }
-      return UserModel.fromDoc(doc);
-    } on FirebaseAuthException catch (e) {
-      throw AuthException.fromFirebaseCode(e.code);
+      return UserModel.fromMap(row);
+    } on sb.AuthException catch (e) {
+      throw AuthException.fromSupabaseCode(e.code, e.message);
     }
   }
 
@@ -64,51 +81,85 @@ class AuthService {
     final String usernameLower = username.trim().toLowerCase();
     await _assertUsernameAvailable(usernameLower);
 
-    UserCredential? credential;
+    sb.User? user;
     try {
-      credential = await _auth.createUserWithEmailAndPassword(
+      final sb.AuthResponse response = await _auth.signUp(
         email: email.trim(),
         password: password,
+        data: {'name': name.trim()},
       );
-
-      final User user = credential.user!;
-      await user.updateDisplayName(name.trim());
+      user = response.user;
+      if (user == null) {
+        // Happens if the project has "Confirm email" on and requires a
+        // second step before a session exists; we still have a user id to
+        // provision the profile row against.
+        throw const AuthException(
+          'Could not create your account. Please try again.',
+          code: 'signup-failed',
+        );
+      }
 
       final UserModel newUser = UserModel(
-        uid: user.uid,
+        uid: user.id,
         username: username.trim(),
         name: name.trim(),
         email: email.trim(),
         createdAt: DateTime.now(),
       );
 
-      // Write the profile and reserve the username atomically.
-      final WriteBatch batch = _firestore.batch();
-      batch.set(
-        _firestore.collection(FirestoreCollections.users).doc(user.uid),
-        newUser.toMap(),
-      );
-      batch.set(
-        _firestore.collection(FirestoreCollections.usernames).doc(usernameLower),
-        {'uid': user.uid},
-      );
-      await batch.commit();
+      // A single insert is already atomic in Postgres — no separate
+      // "reserve the username" write is needed the way the old Firestore
+      // WriteBatch needed one; the unique index on username_lower is the
+      // enforcement point (see supabase_schema.sql).
+      await _client.from(SupabaseTables.users).insert({
+        'id': user.id,
+        ...newUser.toMap(),
+        'username_lower': usernameLower,
+      });
 
       return newUser;
-    } on FirebaseAuthException catch (e) {
-      // Roll back partial user creation if profile writes failed after auth
-      // succeeded, so we never leave an orphaned Firebase Auth account.
-      await credential?.user?.delete().catchError((_) {});
-      throw AuthException.fromFirebaseCode(e.code);
+    } on sb.AuthException catch (e) {
+      // Roll back the partial Auth account if the profile write failed
+      // after sign-up succeeded, so we never leave an orphaned auth user
+      // with no matching profile row. Requires the "Confirm email" setting
+      // to be off, or an active session — best-effort otherwise.
+      await _tryDeleteOrphanedUser(user);
+      throw AuthException.fromSupabaseCode(e.code, e.message);
+    } on sb.PostgrestException catch (e) {
+      await _tryDeleteOrphanedUser(user);
+      if (e.code == '23505') {
+        throw const AuthException(
+          'This username is already taken.',
+          code: 'username-taken',
+        );
+      }
+      throw DatabaseException(
+        'Could not finish creating your profile.',
+        code: e.code,
+      );
+    }
+  }
+
+  Future<void> _tryDeleteOrphanedUser(sb.User? user) async {
+    if (user == null) return;
+    // The client's anon key can't call the admin delete-user endpoint, so
+    // this best-effort cleanup just signs the half-created session back
+    // out; a genuinely orphaned Auth-only account with no `public.users`
+    // row can be cleared up from the Supabase dashboard if it ever occurs.
+    try {
+      await _auth.signOut();
+    } catch (_) {
+      // Ignore — see note above.
     }
   }
 
   Future<void> _assertUsernameAvailable(String usernameLower) async {
-    final DocumentSnapshot<Map<String, dynamic>> reserved = await _firestore
-        .collection(FirestoreCollections.usernames)
-        .doc(usernameLower)
-        .get();
-    if (reserved.exists) {
+    final Map<String, dynamic>? existing = await _client
+        .from(SupabaseTables.users)
+        .select('id')
+        .eq('username_lower', usernameLower)
+        .maybeSingle();
+    if (existing != null) {
       throw const AuthException(
         'This username is already taken.',
         code: 'username-taken',
@@ -118,45 +169,52 @@ class AuthService {
 
   Future<void> sendPasswordResetEmail(String email) async {
     try {
-      await _auth.sendPasswordResetEmail(email: email.trim());
-    } on FirebaseAuthException catch (e) {
-      throw AuthException.fromFirebaseCode(e.code);
+      await _auth.resetPasswordForEmail(email.trim());
+    } on sb.AuthException catch (e) {
+      throw AuthException.fromSupabaseCode(e.code, e.message);
     }
   }
 
   Future<void> updatePassword(String newPassword) async {
     try {
-      await _auth.currentUser?.updatePassword(newPassword);
-    } on FirebaseAuthException catch (e) {
-      throw AuthException.fromFirebaseCode(e.code);
+      await _auth.updateUser(sb.UserAttributes(password: newPassword));
+    } on sb.AuthException catch (e) {
+      throw AuthException.fromSupabaseCode(e.code, e.message);
     }
   }
 
+  /// Re-authenticates the current user by attempting a fresh sign-in with
+  /// their email + current password. GoTrue has no separate
+  /// "reauthenticate" call the way Firebase Auth did (needed there before
+  /// sensitive operations like changing a password); signing in again with
+  /// the same credentials achieves the same verification.
   Future<void> reauthenticate(String email, String currentPassword) async {
-    final User? user = _auth.currentUser;
-    if (user == null) return;
+    if (_auth.currentUser == null) return;
     try {
-      final AuthCredential cred = EmailAuthProvider.credential(
-        email: email,
+      await _auth.signInWithPassword(
+        email: email.trim(),
         password: currentPassword,
       );
-      await user.reauthenticateWithCredential(cred);
-    } on FirebaseAuthException catch (e) {
-      throw AuthException.fromFirebaseCode(e.code);
+    } on sb.AuthException catch (e) {
+      throw AuthException.fromSupabaseCode(e.code, e.message);
     }
   }
 
   Future<void> deleteAccount() async {
-    final User? user = _auth.currentUser;
+    final sb.User? user = _auth.currentUser;
     if (user == null) return;
     try {
-      await _firestore
-          .collection(FirestoreCollections.users)
-          .doc(user.uid)
-          .delete();
-      await user.delete();
-    } on FirebaseAuthException catch (e) {
-      throw AuthException.fromFirebaseCode(e.code);
+      // Deletes the profile row first. The Auth user itself can only be
+      // deleted with the service-role key (an admin-only GoTrue endpoint),
+      // which the client never holds — so this signs the session out
+      // after removing all app-visible data. A production setup typically
+      // pairs this with a Supabase Edge Function (called here via
+      // `_client.functions.invoke(...)`) that uses the service role to
+      // finish deleting the Auth user server-side.
+      await _client.from(SupabaseTables.users).delete().eq('id', user.id);
+      await _auth.signOut();
+    } on sb.PostgrestException catch (e) {
+      throw DatabaseException('Could not delete your account.', code: e.code);
     }
   }
 
