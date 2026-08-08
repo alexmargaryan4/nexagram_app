@@ -133,7 +133,7 @@ class _SplashLogo extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppDimens.xl),
-        const Text(AppConstants.appName, style: AppTypography.brandLogo),
+        Text(AppConstants.appName, style: AppTypography.brandLogo),
         const SizedBox(height: AppDimens.xs),
         Text(
           AppConstants.appTagline,
