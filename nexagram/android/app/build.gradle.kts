@@ -21,7 +21,11 @@ android {
         applicationId = "com.example.nexagram"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Hardcoded to 23 (rather than flutter.minSdkVersion, which resolves
+        // to 21): the `record` plugin's Android manifest declares minSdk 23,
+        // and AGP's manifest merger fails the build if the app's minSdk is
+        // lower than any library's.
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
