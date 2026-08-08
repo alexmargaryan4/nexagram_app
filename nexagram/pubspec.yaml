@@ -1,5 +1,5 @@
 name: nexagram
-description: "NexaGram — a premium, cross-platform messenger built with Flutter and Firebase."
+description: "NexaGram — a premium, cross-platform messenger built with Flutter and Supabase."
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -12,13 +12,8 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
 
-  # ---------- Firebase ----------
-  firebase_core: ^2.32.0
-  firebase_auth: ^4.20.0
-  cloud_firestore: ^4.17.5
-  firebase_storage: ^11.7.7
-  firebase_messaging: ^14.9.4
-  firebase_analytics: ^10.10.7
+  # ---------- Backend: Supabase (Auth, Postgres + Realtime, Storage) ----------
+  supabase_flutter: ^2.6.0
 
   # ---------- State management ----------
   provider: ^6.1.2
