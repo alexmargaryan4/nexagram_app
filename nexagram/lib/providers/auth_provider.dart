@@ -11,10 +11,11 @@ enum AuthStatus { unknown, authenticated, unauthenticated }
 
 /// Single source of truth for "who is signed in" across the app.
 ///
-/// Listens to Firebase's auth-state stream and mirrors the corresponding
-/// Firestore profile document, so any widget can watch [currentUser]
-/// instead of re-fetching it. Also owns presence (online/offline) and FCM
-/// token lifecycle, since both are tied 1:1 to the signed-in session.
+/// Listens to Supabase's auth-state stream and mirrors the corresponding
+/// `public.users` profile row, so any widget can watch [currentUser]
+/// instead of re-fetching it. Also owns presence (online/offline) and the
+/// Realtime message-notification subscription lifecycle, since both are
+/// tied 1:1 to the signed-in session.
 class AuthProvider extends ChangeNotifier {
   AuthProvider({
     AuthService? authService,
@@ -47,26 +48,26 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _status == AuthStatus.authenticated;
 
   void _init() {
-    _authService.authStateChanges().listen((firebaseUser) async {
+    _authService.authStateChanges().listen((supabaseUser) async {
       await _profileSub?.cancel();
 
-      if (firebaseUser == null) {
+      if (supabaseUser == null) {
         _currentUser = null;
         _status = AuthStatus.unauthenticated;
         notifyListeners();
         return;
       }
 
-      _profileSub = _userService.watchUser(firebaseUser.uid).listen((user) {
+      _profileSub = _userService.watchUser(supabaseUser.id).listen((user) {
         _currentUser = user;
         _status =
             user != null ? AuthStatus.authenticated : AuthStatus.unauthenticated;
         notifyListeners();
       });
 
-      await _localStorage.setLastUserId(firebaseUser.uid);
-      await _userService.setOnline(firebaseUser.uid);
-      unawaited(_notificationService.registerToken(firebaseUser.uid));
+      await _localStorage.setLastUserId(supabaseUser.id);
+      await _userService.setOnline(supabaseUser.id);
+      unawaited(_notificationService.registerToken(supabaseUser.id));
     });
   }
 

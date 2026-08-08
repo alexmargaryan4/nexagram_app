@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/chat_model.dart';
 import '../models/user_model.dart';
 import '../services/chat_service.dart';
+import '../services/notification_service.dart';
 import '../services/user_service.dart';
 
 /// Live chat list for the signed-in user, plus lightweight caching of the
@@ -13,15 +14,18 @@ class ChatsProvider extends ChangeNotifier {
     required String currentUid,
     ChatService? chatService,
     UserService? userService,
+    NotificationService? notificationService,
   })  : _currentUid = currentUid,
         _chatService = chatService ?? ChatService(),
-        _userService = userService ?? UserService() {
+        _userService = userService ?? UserService(),
+        _notificationService = notificationService ?? NotificationService() {
     _subscribe();
   }
 
   final String _currentUid;
   final ChatService _chatService;
   final UserService _userService;
+  final NotificationService _notificationService;
 
   StreamSubscription<List<ChatModel>>? _sub;
 
@@ -59,6 +63,10 @@ class ChatsProvider extends ChangeNotifier {
         _chats = chats;
         _isLoading = false;
         _error = null;
+        // Keeps the foreground-notification listener's chat-id filter in
+        // sync with the chats this user actually participates in (see
+        // NotificationService.updateWatchedChats).
+        _notificationService.updateWatchedChats(chats.map((c) => c.id).toSet());
         notifyListeners();
         await _hydrateParticipants(chats);
       },
