@@ -17,6 +17,7 @@ class MessageBubble extends StatelessWidget {
     super.key,
     required this.message,
     required this.isMe,
+    required this.currentUid,
     this.isGroupChat = false,
     this.senderName,
     this.showTail = true,
@@ -27,6 +28,7 @@ class MessageBubble extends StatelessWidget {
 
   final MessageModel message;
   final bool isMe;
+  final String currentUid;
   final bool isGroupChat;
   final String? senderName;
   final bool showTail;
@@ -46,6 +48,10 @@ class MessageBubble extends StatelessWidget {
 
     if (message.isDeleted) {
       return _DeletedBubble(isMe: isMe, isDark: isDark);
+    }
+
+    if (message.type == MessageType.system) {
+      return _SystemMessageChip(message: message, currentUid: currentUid);
     }
 
     return Align(
@@ -176,6 +182,52 @@ class _DeletedBubble extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Centered, pill-shaped chip for [MessageType.system] events (currently:
+/// "member added to group"). Decodes [message.text] per-viewer via
+/// [SystemMessageCodec] so the person who was just added sees "{who} added
+/// you", while everyone else sees "{who} joined" — falls back to showing
+/// the raw text as-is if it isn't a recognized encoded payload (e.g. an
+/// older plain-text system message).
+class _SystemMessageChip extends StatelessWidget {
+  const _SystemMessageChip({required this.message, required this.currentUid});
+
+  final MessageModel message;
+  final String currentUid;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color muted =
+        isDark ? AppColors.darkSecondaryText : AppColors.lightSecondaryText;
+    final String text =
+        SystemMessageCodec.displayTextFor(message.text, currentUid);
+
+    return Align(
+      alignment: Alignment.center,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.8,
+        ),
+        decoration: BoxDecoration(
+          color: (isDark ? Colors.white : Colors.black).withOpacity(0.06),
+          borderRadius: BorderRadius.circular(AppDimens.radiusPill),
+        ),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w500,
+            color: muted,
+          ),
         ),
       ),
     );
