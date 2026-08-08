@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Networking (Firebase Auth/Firestore/Storage/Messaging) -->
+    <!-- Networking (Supabase Auth/Postgres/Realtime/Storage) -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -22,11 +22,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- Push notifications (Android 13+ requires explicit runtime permission) -->
+    <!-- Local notifications, shown for messages delivered over the live
+         Realtime connection while the app is open or backgrounded
+         (Android 13+ requires explicit runtime permission) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
 
     <application
         android:label="nexagram"
