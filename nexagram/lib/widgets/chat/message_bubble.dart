@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../models/message_model.dart';
 import '../../theme/theme.dart';
+import 'voice_message_player.dart';
 
 /// Renders a single [MessageModel] as a chat bubble.
 ///
@@ -325,82 +326,14 @@ class _MessageContent extends StatelessWidget {
           ],
         );
       case MessageType.voice:
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: textColor.withOpacity(0.18),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.play_arrow_rounded, color: textColor, size: 20),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 110,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    height: 22,
-                    child: CustomPaint(
-                      painter: _WaveformPainter(color: textColor),
-                      size: const Size(110, 22),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    DateFormatter.voiceDuration(message.voiceDurationMs),
-                    style: TextStyle(
-                        color: textColor.withOpacity(0.7), fontSize: 11.5),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        return VoiceMessagePlayer(
+          sourceUrl: message.mediaUrl ?? '',
+          totalDuration: Duration(milliseconds: message.voiceDurationMs ?? 0),
+          color: textColor,
+          isMe: isMe,
         );
     }
   }
-}
-
-/// Simple static waveform decoration for voice message bubbles. Not tied
-/// to real audio amplitude data — a lightweight visual affordance rather
-/// than a full audio-analysis feature.
-class _WaveformPainter extends CustomPainter {
-  _WaveformPainter({required this.color});
-
-  final Color color;
-
-  static const List<double> _heights = [
-    0.3, 0.6, 0.9, 0.5, 0.8, 0.4, 0.7, 1.0, 0.5, 0.65,
-    0.35, 0.8, 0.55, 0.9, 0.4, 0.6, 0.3, 0.5, 0.75, 0.45,
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()
-      ..color = color.withOpacity(0.85)
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round;
-
-    final double gap = size.width / _heights.length;
-    for (int i = 0; i < _heights.length; i++) {
-      final double x = i * gap + gap / 2;
-      final double h = size.height * _heights[i];
-      canvas.drawLine(
-        Offset(x, (size.height - h) / 2),
-        Offset(x, (size.height + h) / 2),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _WaveformPainter oldDelegate) =>
-      oldDelegate.color != color;
 }
 
 class _MessageMeta extends StatelessWidget {

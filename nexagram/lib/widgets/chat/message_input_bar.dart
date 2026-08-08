@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../core/constants/app_constants.dart';
 import '../../models/message_model.dart';
@@ -31,9 +33,12 @@ class MessageInputBar extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final VoidCallback onAttachPressed;
   final VoidCallback onCameraPressed;
-  final VoidCallback? onStartVoiceRecording;
-  final VoidCallback? onCancelVoiceRecording;
-  final VoidCallback? onFinishVoiceRecording;
+
+  /// Starts recording. Returns false (without entering recording UI) if
+  /// e.g. microphone permission was denied.
+  final Future<bool> Function()? onStartVoiceRecording;
+  final Future<void> Function()? onCancelVoiceRecording;
+  final Future<void> Function()? onFinishVoiceRecording;
   final MessageModel? replyTarget;
   final VoidCallback? onCancelReply;
 
@@ -46,6 +51,8 @@ class _MessageInputBarState extends State<MessageInputBar> {
   final FocusNode _focusNode = FocusNode();
   bool _hasText = false;
   bool _isRecording = false;
+  Duration _recordingElapsed = Duration.zero;
+  Timer? _recordingTimer;
 
   @override
   void initState() {
@@ -61,6 +68,7 @@ class _MessageInputBarState extends State<MessageInputBar> {
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
+    _recordingTimer?.cancel();
     super.dispose();
   }
 
@@ -69,6 +77,39 @@ class _MessageInputBarState extends State<MessageInputBar> {
     if (text.trim().isEmpty) return;
     widget.onSendText(text);
     _controller.clear();
+  }
+
+  Future<void> _startRecording() async {
+    final bool started = await widget.onStartVoiceRecording?.call() ?? false;
+    if (!started || !mounted) return;
+    setState(() {
+      _isRecording = true;
+      _recordingElapsed = Duration.zero;
+    });
+    _recordingTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (!mounted) return;
+      setState(() {
+        _recordingElapsed += const Duration(milliseconds: 200);
+      });
+      // Auto-stop at the max voice message length so a forgotten held
+      // finger doesn't record indefinitely.
+      if (_recordingElapsed.inSeconds >= AppConstants.maxVoiceMessageSeconds) {
+        _finishRecording();
+      }
+    });
+  }
+
+  Future<void> _cancelRecording() async {
+    _recordingTimer?.cancel();
+    setState(() => _isRecording = false);
+    await widget.onCancelVoiceRecording?.call();
+  }
+
+  Future<void> _finishRecording() async {
+    if (!_isRecording) return;
+    _recordingTimer?.cancel();
+    setState(() => _isRecording = false);
+    await widget.onFinishVoiceRecording?.call();
   }
 
   void _insertEmoji(String emoji) {
@@ -96,9 +137,8 @@ class _MessageInputBarState extends State<MessageInputBar> {
 
   void _showEmojiPicker() {
     FocusScope.of(context).unfocus();
-    showModalBottomSheet<void>(
+    showGlassBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => EmojiPickerSheet(onSelected: _insertEmoji),
     );
@@ -142,6 +182,9 @@ class _MessageInputBarState extends State<MessageInputBar> {
                     color: isDark
                         ? AppColors.darkSecondaryText
                         : AppColors.lightSecondaryText,
+                    padding: const EdgeInsets.all(10),
+                    constraints: const BoxConstraints(),
+                    splashRadius: 22,
                     onPressed: widget.onAttachPressed,
                   ),
                   IconButton(
@@ -150,68 +193,150 @@ class _MessageInputBarState extends State<MessageInputBar> {
                     color: isDark
                         ? AppColors.darkSecondaryText
                         : AppColors.lightSecondaryText,
+                    padding: const EdgeInsets.all(10),
+                    constraints: const BoxConstraints(),
+                    splashRadius: 22,
                     onPressed: _showEmojiPicker,
                   ),
                   Expanded(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 120),
-                      child: TextField(
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        minLines: 1,
-                        maxLines: 5,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color:
-                              isDark ? AppColors.darkText : AppColors.lightText,
-                        ),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: _isRecording
-                              ? 'Recording…'
-                              : 'Message',
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled: false,
-                          contentPadding:
-                              const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        onSubmitted: (_) => _send(),
-                      ),
+                    child: _isRecording
+                        ? _RecordingIndicator(elapsed: _recordingElapsed)
+                        : ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 120),
+                            child: TextField(
+                              controller: _controller,
+                              focusNode: _focusNode,
+                              minLines: 1,
+                              maxLines: 5,
+                              textCapitalization: TextCapitalization.sentences,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: isDark
+                                    ? AppColors.darkText
+                                    : AppColors.lightText,
+                              ),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                hintText: 'Message',
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                filled: false,
+                                contentPadding:
+                                    EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              onSubmitted: (_) => _send(),
+                            ),
+                          ),
+                  ),
+                  if (!_isRecording)
+                    IconButton(
+                      icon: const Icon(Icons.camera_alt_outlined),
+                      tooltip: 'Camera',
+                      color: isDark
+                          ? AppColors.darkSecondaryText
+                          : AppColors.lightSecondaryText,
+                      onPressed: widget.onCameraPressed,
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    tooltip: 'Camera',
-                    color: isDark
-                        ? AppColors.darkSecondaryText
-                        : AppColors.lightSecondaryText,
-                    onPressed: widget.onCameraPressed,
-                  ),
                   _TrailingAction(
                     hasText: _hasText,
                     isRecording: _isRecording,
                     onSend: _send,
-                    onStartRecording: () {
-                      setState(() => _isRecording = true);
-                      widget.onStartVoiceRecording?.call();
-                    },
-                    onCancelRecording: () {
-                      setState(() => _isRecording = false);
-                      widget.onCancelVoiceRecording?.call();
-                    },
-                    onFinishRecording: () {
-                      setState(() => _isRecording = false);
-                      widget.onFinishVoiceRecording?.call();
-                    },
+                    onStartRecording: _startRecording,
+                    onCancelRecording: _cancelRecording,
+                    onFinishRecording: _finishRecording,
                   ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Replaces the text field while recording: a pulsing red dot, an
+/// elapsed-time readout (tabular figures so it doesn't jitter the layout
+/// as digits change), and a "Slide to cancel" hint — the same shape as
+/// Telegram/WhatsApp's in-composer recording state.
+class _RecordingIndicator extends StatefulWidget {
+  const _RecordingIndicator({required this.elapsed});
+
+  final Duration elapsed;
+
+  @override
+  State<_RecordingIndicator> createState() => _RecordingIndicatorState();
+}
+
+class _RecordingIndicatorState extends State<_RecordingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  String get _timeLabel {
+    final int totalSeconds = widget.elapsed.inSeconds;
+    final String minutes = (totalSeconds ~/ 60).toString();
+    final String seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color muted =
+        isDark ? AppColors.darkSecondaryText : AppColors.lightSecondaryText;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+      child: Row(
+        children: [
+          FadeTransition(
+            opacity: _pulseController.drive(
+              Tween<double>(begin: 1, end: 0.25),
+            ),
+            child: Container(
+              width: 9,
+              height: 9,
+              decoration: const BoxDecoration(
+                color: AppColors.error,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _timeLabel,
+            style: TextStyle(
+              fontSize: 16,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Slide to cancel',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13.5, color: muted),
+            ),
+          ),
+        ],
       ),
     );
   }
