@@ -26,6 +26,21 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>NexaGram uses your camera to take photos for your profile picture and to share in chats.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NexaGram needs access to your photo library so you can share images and set your profile picture.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>NexaGram saves images you choose to download from chats to your photo library.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>NexaGram uses your microphone to record voice messages.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>NexaGram sends notifications when you receive new messages.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
