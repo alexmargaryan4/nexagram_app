@@ -1,30 +1,32 @@
-// This is a basic Flutter widget test.
+// Minimal smoke test: verifies the app boots without throwing.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// A deeper widget test would need a fake Supabase client and seeded auth
+// state (the previous placeholder here was flutter create's counter-app
+// template and didn't actually exercise NexaGramApp), so this intentionally
+// stays a light "does it construct" check rather than asserting on screen
+// content that depends on backend state.
+//
+// Supabase.initialize() only builds a local client — it does not make a
+// network call — so a dummy URL/key is enough to satisfy the services'
+// `Supabase.instance.client` lookups during the test.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:nexagram/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('NexaGramApp builds without throwing', (WidgetTester tester) async {
+    await Supabase.initialize(
+      url: 'https://example.supabase.co',
+      anonKey: 'test-anon-key',
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpWidget(const NexaGramApp());
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // The app should have built a MaterialApp-backed widget tree.
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }
