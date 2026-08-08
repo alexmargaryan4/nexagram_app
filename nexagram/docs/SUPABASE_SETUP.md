@@ -71,6 +71,27 @@ that let signed-in users upload/read/delete avatars and chat media.
 4. Optional: customize the email templates under **Authentication →
    Email Templates** to match NexaGram's branding.
 
+### Redirect URLs (required — without this, confirmation links open a dead `localhost` page)
+
+By default, Supabase sends the user back to your project's **Site URL**
+after they tap the confirmation/password-reset link in the email — which
+is a placeholder like `http://localhost:3000` and does nothing on a
+phone. The app instead asks Supabase to redirect to the custom deep link
+`nexagram://login-callback` (see `kEmailRedirectTo` in
+`lib/services/auth_service.dart`), which opens the app directly. For
+Supabase to honor that, the URL must be allow-listed:
+
+1. Go to **Authentication → URL Configuration**.
+2. Under **Redirect URLs**, add:
+   ```
+   nexagram://login-callback
+   ```
+3. Save.
+
+If this step is skipped, GoTrue silently falls back to the Site URL and
+confirmation/reset links keep landing on `localhost` exactly as before —
+this is a dashboard setting, not something the app can configure itself.
+
 ---
 
 ## 6. Get your project credentials
