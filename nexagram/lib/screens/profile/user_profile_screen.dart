@@ -53,6 +53,60 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     context.push(AppRoutes.chatPath(chat.id));
   }
 
+  Future<void> _toggleBlock(bool isBlocked) async {
+    final String myUid = context.read<AuthProvider>().currentUser!.uid;
+
+    if (!isBlocked) {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Block ${_user?.name ?? 'this user'}?'),
+          content: const Text(
+            'They won\'t be able to message you or see your profile. '
+            'You can unblock them anytime from Settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Block',
+                style: TextStyle(color: AppColors.error),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    try {
+      if (isBlocked) {
+        await _userService.unblockUser(myUid, widget.uid);
+      } else {
+        await _userService.blockUser(myUid, widget.uid);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isBlocked
+                ? '${_user?.name ?? 'User'} was unblocked.'
+                : '${_user?.name ?? 'User'} was blocked.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Something went wrong. Try again.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final String myUid = context.watch<AuthProvider>().currentUser!.uid;
@@ -72,6 +126,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Widget _buildBody(BuildContext context, UserModel user) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool isBlocked = context
+            .watch<AuthProvider>()
+            .currentUser
+            ?.blockedUserIds
+            .contains(user.uid) ??
+        false;
 
     return ListView(
       padding: const EdgeInsets.all(AppDimens.lg),
@@ -174,6 +234,42 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
           ),
         ],
+        const SizedBox(height: AppDimens.xxl),
+        Material(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppDimens.radiusMedium),
+            onTap: () => _toggleBlock(isBlocked),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppDimens.md,
+                vertical: AppDimens.md,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isBlocked
+                        ? Icons.block_rounded
+                        : Icons.block_outlined,
+                    color: AppColors.error,
+                  ),
+                  const SizedBox(width: AppDimens.md),
+                  Text(
+                    isBlocked
+                        ? 'Unblock ${user.name.isNotEmpty ? user.name : user.username}'
+                        : 'Block ${user.name.isNotEmpty ? user.name : user.username}',
+                    style: const TextStyle(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
