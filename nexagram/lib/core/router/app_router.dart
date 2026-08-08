@@ -3,6 +3,7 @@ import '../../providers/auth_provider.dart';
 import '../../screens/auth/login_screen.dart';
 import '../../screens/auth/register_screen.dart';
 import '../../screens/chat/chat_screen.dart';
+import '../../screens/chat/group_info_screen.dart';
 import '../../screens/contacts/new_group_screen.dart';
 import '../../screens/main_shell.dart';
 import '../../screens/profile/edit_profile_screen.dart';
@@ -70,6 +71,15 @@ GoRouter buildAppRouter(AuthProvider authProvider) {
             builder: (context, state) => ChatScreen(
               chatId: state.pathParameters['chatId']!,
             ),
+            routes: [
+              GoRoute(
+                path: 'info',
+                name: AppRoutes.groupInfoName,
+                builder: (context, state) => GroupInfoScreen(
+                  chatId: state.pathParameters['chatId']!,
+                ),
+              ),
+            ],
           ),
         ],
       ),
