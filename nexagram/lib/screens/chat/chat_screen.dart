@@ -19,11 +19,13 @@ import '../../services/chat_service.dart';
 import '../../services/user_service.dart';
 import '../../services/voice_recorder_service.dart';
 import '../../theme/theme.dart';
+import '../../widgets/chat/forward_message_sheet.dart';
 import '../../widgets/chat/message_bubble.dart';
 import '../../widgets/chat/message_input_bar.dart';
 import '../../widgets/chat/reaction_picker.dart';
 import '../../widgets/common/glass_container.dart';
 import '../../widgets/common/user_avatar.dart';
+import 'group_info_screen.dart';
 
 /// The conversation screen for a single chat.
 ///
@@ -282,6 +284,14 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
                         provider.setReplyTarget(message);
                       },
                     ),
+                    _ActionTile(
+                      icon: Icons.forward_rounded,
+                      label: 'Forward',
+                      onTap: () {
+                        Navigator.pop(context);
+                        ForwardMessageSheet.show(context, message);
+                      },
+                    ),
                     if (message.type == MessageType.text)
                       _ActionTile(
                         icon: Icons.copy_rounded,
@@ -333,6 +343,8 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
             if (widget.chat.type == ChatType.private &&
                 widget.otherUser != null) {
               context.push(AppRoutes.userProfilePath(widget.otherUser!.uid));
+            } else if (widget.chat.type == ChatType.group) {
+              context.push(AppRoutes.groupInfoPath(widget.chat.id));
             }
           },
           child: Row(
@@ -432,6 +444,7 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
                                 child: MessageBubble(
                                   message: message,
                                   isMe: isMe,
+                                  currentUid: currentUid,
                                   isGroupChat:
                                       widget.chat.type == ChatType.group,
                                   senderName:
