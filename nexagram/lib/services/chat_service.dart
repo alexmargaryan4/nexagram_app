@@ -1,50 +1,66 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../core/constants/app_constants.dart';
 import '../core/errors/app_exception.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
 import '../models/typing_status_model.dart';
 
-/// Handles everything under `chats/{chatId}` — conversation metadata,
-/// the `messages` sub-collection, typing indicators, reactions, and
+/// Handles everything around `public.chats` — conversation metadata, the
+/// `public.messages` table, typing indicators, reactions, and
 /// read/delivery receipts.
 class ChatService {
-  ChatService({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+  ChatService({sb.SupabaseClient? client})
+      : _client = client ?? sb.Supabase.instance.client;
 
-  final FirebaseFirestore _firestore;
+  final sb.SupabaseClient _client;
 
-  CollectionReference<Map<String, dynamic>> get _chats =>
-      _firestore.collection(FirestoreCollections.chats);
+  sb.SupabaseQueryBuilder get _chats => _client.from(SupabaseTables.chats);
 
-  CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
-      _chats.doc(chatId).collection(FirestoreCollections.messages);
+  sb.SupabaseQueryBuilder get _messages => _client.from(SupabaseTables.messages);
 
-  CollectionReference<Map<String, dynamic>> _typing(String chatId) =>
-      _chats.doc(chatId).collection(FirestoreCollections.typingStatus);
+  sb.SupabaseQueryBuilder get _typing => _client.from(SupabaseTables.typingStatus);
 
   // ---------------------------------------------------------------------
   // Chat list & metadata
   // ---------------------------------------------------------------------
 
   /// Live list of chats the given user participates in, most-recent first.
+  ///
+  /// Realtime's `.stream()` can't filter on "array contains", so this
+  /// streams every row change and filters/sorts client-side — fine at the
+  /// scale a single user's chat list operates at (Firestore's
+  /// `arrayContains` query did the equivalent filtering server-side, but
+  /// the client-visible result is identical).
   Stream<List<ChatModel>> watchUserChats(String uid) {
-    return _chats
-        .where('participantIds', arrayContains: uid)
-        .orderBy('lastMessageAt', descending: true)
-        .snapshots()
-        .map((snap) => snap.docs.map(ChatModel.fromDoc).toList());
+    return _client
+        .from(SupabaseTables.chats)
+        .stream(primaryKey: ['id'])
+        .map((rows) {
+          final List<ChatModel> chats = rows
+              .map(ChatModel.fromMap)
+              .where((c) => c.participantIds.contains(uid))
+              .toList()
+            ..sort((a, b) {
+              final DateTime aAt = a.lastMessageAt ?? DateTime(0);
+              final DateTime bAt = b.lastMessageAt ?? DateTime(0);
+              return bAt.compareTo(aAt);
+            });
+          return chats;
+        });
   }
 
   Stream<ChatModel?> watchChat(String chatId) {
-    return _chats.doc(chatId).snapshots().map(
-          (doc) => doc.exists ? ChatModel.fromDoc(doc) : null,
-        );
+    return _client
+        .from(SupabaseTables.chats)
+        .stream(primaryKey: ['id'])
+        .eq('id', chatId)
+        .map((rows) => rows.isEmpty ? null : ChatModel.fromMap(rows.first));
   }
 
   Future<ChatModel?> getChat(String chatId) async {
-    final doc = await _chats.doc(chatId).get();
-    return doc.exists ? ChatModel.fromDoc(doc) : null;
+    final Map<String, dynamic>? row =
+        await _chats.select().eq('id', chatId).maybeSingle();
+    return row != null ? ChatModel.fromMap(row) : null;
   }
 
   /// Gets-or-creates the deterministic 1:1 chat between two users.
@@ -53,11 +69,11 @@ class ChatService {
     String otherUid,
   ) async {
     final String chatId = ChatModel.privateChatId(myUid, otherUid);
-    final DocumentReference<Map<String, dynamic>> ref = _chats.doc(chatId);
-    final DocumentSnapshot<Map<String, dynamic>> existing = await ref.get();
 
-    if (existing.exists) {
-      return ChatModel.fromDoc(existing);
+    final Map<String, dynamic>? existing =
+        await _chats.select().eq('id', chatId).maybeSingle();
+    if (existing != null) {
+      return ChatModel.fromMap(existing);
     }
 
     final ChatModel chat = ChatModel(
@@ -70,10 +86,16 @@ class ChatService {
     );
 
     try {
-      await ref.set(chat.toMap());
-      return chat;
-    } catch (e) {
-      throw const FirestoreException('Could not start the conversation.');
+      // Upsert rather than insert: if two clients race to open the same
+      // 1:1 chat at once, the deterministic id means the second write
+      // just no-ops onto the same row instead of erroring.
+      final Map<String, dynamic> row = await _chats
+          .upsert({'id': chatId, ...chat.toMap()}, onConflict: 'id')
+          .select()
+          .single();
+      return ChatModel.fromMap(row);
+    } on sb.PostgrestException catch (_) {
+      throw const DatabaseException('Could not start the conversation.');
     }
   }
 
@@ -84,10 +106,9 @@ class ChatService {
     String? avatarUrl,
   }) async {
     final List<String> participants = {creatorUid, ...memberUids}.toList();
-    final DocumentReference<Map<String, dynamic>> ref = _chats.doc();
 
     final ChatModel chat = ChatModel(
-      id: ref.id,
+      id: '', // assigned by the database default (uuid) below
       type: ChatType.group,
       participantIds: participants,
       groupName: groupName,
@@ -99,11 +120,22 @@ class ChatService {
     );
 
     try {
-      await ref.set(chat.toMap());
-      return chat;
-    } catch (e) {
-      throw const FirestoreException('Could not create the group.');
+      final Map<String, dynamic> map = chat.toMap()..['id'] = _newGroupId();
+      final Map<String, dynamic> row =
+          await _chats.insert(map).select().single();
+      return ChatModel.fromMap(row);
+    } on sb.PostgrestException catch (_) {
+      throw const DatabaseException('Could not create the group.');
     }
+  }
+
+  /// Generates a unique id for a new group chat. Private chats use the
+  /// deterministic `uidA_uidB` scheme instead (see [ChatModel.privateChatId]);
+  /// groups just need any collision-free string, so a timestamp + random
+  /// suffix is enough without pulling in a uuid package dependency here.
+  String _newGroupId() {
+    final int rand = DateTime.now().microsecondsSinceEpoch % 1000000;
+    return 'grp_${DateTime.now().millisecondsSinceEpoch}_$rand';
   }
 
   Future<void> updateGroupInfo(
@@ -112,47 +144,59 @@ class ChatService {
     String? groupAvatarUrl,
   }) async {
     final Map<String, dynamic> updates = {};
-    if (groupName != null) updates['groupName'] = groupName;
-    if (groupAvatarUrl != null) updates['groupAvatarUrl'] = groupAvatarUrl;
+    if (groupName != null) updates['group_name'] = groupName;
+    if (groupAvatarUrl != null) updates['group_avatar_url'] = groupAvatarUrl;
     if (updates.isEmpty) return;
-    await _chats.doc(chatId).update(updates);
+    await _chats.update(updates).eq('id', chatId);
   }
 
   Future<void> addGroupMember(String chatId, String uid) async {
-    await _chats.doc(chatId).update({
-      'participantIds': FieldValue.arrayUnion([uid]),
-      'unreadCounts.$uid': 0,
-    });
+    final chat = await getChat(chatId);
+    if (chat == null) return;
+    final participants = {...chat.participantIds, uid}.toList();
+    final unread = {...chat.unreadCounts, uid: chat.unreadCounts[uid] ?? 0};
+    await _chats.update({
+      'participant_ids': participants,
+      'unread_counts': unread,
+    }).eq('id', chatId);
   }
 
   Future<void> removeGroupMember(String chatId, String uid) async {
-    await _chats.doc(chatId).update({
-      'participantIds': FieldValue.arrayRemove([uid]),
-      'groupAdminIds': FieldValue.arrayRemove([uid]),
-    });
+    final chat = await getChat(chatId);
+    if (chat == null) return;
+    final participants = chat.participantIds.where((id) => id != uid).toList();
+    final admins = chat.groupAdminIds.where((id) => id != uid).toList();
+    await _chats.update({
+      'participant_ids': participants,
+      'group_admin_ids': admins,
+    }).eq('id', chatId);
   }
 
   Future<void> toggleMute(String chatId, String uid, bool mute) async {
-    await _chats.doc(chatId).update({
-      'mutedBy': mute
-          ? FieldValue.arrayUnion([uid])
-          : FieldValue.arrayRemove([uid]),
-    });
+    final chat = await getChat(chatId);
+    if (chat == null) return;
+    final muted = mute
+        ? {...chat.mutedBy, uid}.toList()
+        : chat.mutedBy.where((id) => id != uid).toList();
+    await _chats.update({'muted_by': muted}).eq('id', chatId);
   }
 
   Future<void> togglePin(String chatId, String uid, bool pin) async {
-    await _chats.doc(chatId).update({
-      'pinnedBy': pin
-          ? FieldValue.arrayUnion([uid])
-          : FieldValue.arrayRemove([uid]),
-    });
+    final chat = await getChat(chatId);
+    if (chat == null) return;
+    final pinned = pin
+        ? {...chat.pinnedBy, uid}.toList()
+        : chat.pinnedBy.where((id) => id != uid).toList();
+    await _chats.update({'pinned_by': pinned}).eq('id', chatId);
   }
 
   Future<void> deleteChat(String chatId) async {
-    // NOTE: message sub-collection cleanup is handled server-side by a
-    // Cloud Function trigger (see docs/FIREBASE_SETUP.md) since client SDKs
-    // cannot recursively delete sub-collections.
-    await _chats.doc(chatId).delete();
+    // Message cleanup is automatic: `messages.chat_id` has
+    // `on delete cascade` against `chats.id` (see supabase_schema.sql), so
+    // no separate server-side function/trigger is needed the way
+    // Firestore needed a Cloud Function for recursive sub-collection
+    // deletes.
+    await _chats.delete().eq('id', chatId);
   }
 
   // ---------------------------------------------------------------------
@@ -164,28 +208,34 @@ class ChatService {
     String chatId, {
     int limit = AppConstants.messagePageSize,
   }) {
-    return _messages(chatId)
-        .orderBy('createdAt', descending: true)
+    return _client
+        .from(SupabaseTables.messages)
+        .stream(primaryKey: ['id'])
+        .eq('chat_id', chatId)
+        .order('created_at', ascending: false)
         .limit(limit)
-        .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => MessageModel.fromDoc(d, chatId)).toList());
+        .map((rows) => rows.map(MessageModel.fromMap).toList());
   }
 
-  /// Loads an older page of messages for pagination, before [beforeDoc].
+  /// Loads an older page of messages for pagination, before [before].
   Future<List<MessageModel>> loadMoreMessages(
     String chatId, {
     required DateTime before,
     int limit = AppConstants.messagePageSize,
   }) async {
-    final snap = await _messages(chatId)
-        .orderBy('createdAt', descending: true)
-        .startAfter([Timestamp.fromDate(before)])
-        .limit(limit)
-        .get();
-    return snap.docs.map((d) => MessageModel.fromDoc(d, chatId)).toList();
+    final List<Map<String, dynamic>> rows = await _messages
+        .select()
+        .eq('chat_id', chatId)
+        .lt('created_at', before.toUtc().toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(limit);
+    return rows.map(MessageModel.fromMap).toList();
   }
 
+  /// Sends a message and atomically updates the parent chat's preview
+  /// fields + per-participant unread counters via the `send_message` RPC
+  /// (see `supabase_schema.sql`) — the equivalent of the old Firestore
+  /// `WriteBatch` used here.
   Future<MessageModel> sendMessage({
     required String chatId,
     required String senderId,
@@ -201,51 +251,30 @@ class ChatService {
     String? replyToSenderName,
     required List<String> participantIds,
   }) async {
-    final DocumentReference<Map<String, dynamic>> msgRef = _messages(chatId).doc();
-
-    final MessageModel message = MessageModel(
-      id: msgRef.id,
-      chatId: chatId,
-      senderId: senderId,
-      type: type,
-      text: text,
-      mediaUrl: mediaUrl,
-      mediaThumbUrl: mediaThumbUrl,
-      fileName: fileName,
-      fileSizeBytes: fileSizeBytes,
-      voiceDurationMs: voiceDurationMs,
-      deliveredTo: [senderId],
-      readBy: [senderId],
-      replyToMessageId: replyToMessageId,
-      replyToPreview: replyToPreview,
-      replyToSenderName: replyToSenderName,
-    );
-
     final String previewText = _previewFor(type, text, fileName);
 
     try {
-      final WriteBatch batch = _firestore.batch();
-      batch.set(msgRef, message.toMap());
-
-      final Map<String, dynamic> chatUpdate = {
-        'lastMessage': previewText,
-        'lastMessageSenderId': senderId,
-        'lastMessageType': type.name,
-        'lastMessageAt': FieldValue.serverTimestamp(),
-      };
-      for (final uid in participantIds) {
-        if (uid == senderId) {
-          chatUpdate['unreadCounts.$uid'] = 0;
-        } else {
-          chatUpdate['unreadCounts.$uid'] = FieldValue.increment(1);
-        }
-      }
-      batch.update(_chats.doc(chatId), chatUpdate);
-      await batch.commit();
-
-      return message;
-    } catch (e) {
-      throw const FirestoreException('Message failed to send.');
+      final dynamic row = await _client.rpc(
+        SupabaseRpc.sendMessage,
+        params: {
+          'p_chat_id': chatId,
+          'p_sender_id': senderId,
+          'p_type': type.name,
+          'p_text': text,
+          'p_media_url': mediaUrl,
+          'p_media_thumb_url': mediaThumbUrl,
+          'p_file_name': fileName,
+          'p_file_size_bytes': fileSizeBytes,
+          'p_voice_duration_ms': voiceDurationMs,
+          'p_reply_to_message_id': replyToMessageId,
+          'p_reply_to_preview': replyToPreview,
+          'p_reply_to_sender_name': replyToSenderName,
+          'p_preview_text': previewText,
+        },
+      );
+      return MessageModel.fromMap(row as Map<String, dynamic>);
+    } on sb.PostgrestException catch (_) {
+      throw const DatabaseException('Message failed to send.');
     }
   }
 
@@ -265,70 +294,58 @@ class ChatService {
   }
 
   Future<void> editMessage(String chatId, String messageId, String newText) async {
-    await _messages(chatId).doc(messageId).update({
+    await _messages.update({
       'text': newText,
-      'editedAt': FieldValue.serverTimestamp(),
-    });
+      'edited_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', messageId);
   }
 
   Future<void> deleteMessage(String chatId, String messageId) async {
-    await _messages(chatId).doc(messageId).update({
-      'isDeleted': true,
+    await _messages.update({
+      'is_deleted': true,
       'text': '',
-      'mediaUrl': null,
-    });
+      'media_url': null,
+    }).eq('id', messageId);
   }
 
   Future<void> markAsDelivered(String chatId, String messageId, String uid) async {
-    await _messages(chatId).doc(messageId).update({
-      'deliveredTo': FieldValue.arrayUnion([uid]),
-    }).catchError((_) {});
+    try {
+      final Map<String, dynamic>? row = await _messages
+          .select('delivered_to')
+          .eq('id', messageId)
+          .maybeSingle();
+      if (row == null) return;
+      final List<String> delivered =
+          List<String>.from((row['delivered_to'] as List<dynamic>?) ?? const []);
+      if (delivered.contains(uid)) return;
+      await _messages
+          .update({'delivered_to': [...delivered, uid]}).eq('id', messageId);
+    } catch (_) {
+      // Best-effort, same as the old Firestore call.
+    }
   }
 
   /// Marks every unread message in [chatId] as read by [uid] and resets
-  /// their unread counter. Batches in chunks of 400 to stay under
-  /// Firestore's 500-write batch limit.
-  ///
-  /// Firestore has no server-side "array does not contain" query, so we
-  /// fetch the most recent page of messages (bounded by [recentWindow])
-  /// and filter the `readBy` membership check client-side. This is O(1)
-  /// reads relative to chat length rather than scanning the full history,
-  /// which is the right trade-off since users only ever need to catch up
-  /// on recent activity.
+  /// their unread counter, via the `mark_chat_as_read` RPC (see
+  /// `supabase_schema.sql`) — the equivalent of the old batched Firestore
+  /// write, done server-side in one round trip instead of N client writes.
   Future<void> markChatAsRead(
     String chatId,
     String uid, {
     int recentWindow = 200,
   }) async {
-    final QuerySnapshot<Map<String, dynamic>> recent = await _messages(chatId)
-        .orderBy('createdAt', descending: true)
-        .limit(recentWindow)
-        .get();
-
-    final WriteBatch batch = _firestore.batch();
-    int pendingWrites = 0;
-
-    for (final doc in recent.docs) {
-      final List<dynamic> readBy =
-          (doc.data()['readBy'] as List<dynamic>?) ?? const [];
-      if (!readBy.contains(uid)) {
-        batch.update(doc.reference, {
-          'readBy': FieldValue.arrayUnion([uid]),
-        });
-        pendingWrites++;
-        // Stay comfortably under Firestore's 500-operation batch limit
-        // even after adding the trailing unreadCounts reset below.
-        if (pendingWrites >= 498) break;
-      }
-    }
-
-    batch.update(_chats.doc(chatId), {'unreadCounts.$uid': 0});
-
     try {
-      await batch.commit();
+      await _client.rpc(
+        SupabaseRpc.markChatAsRead,
+        params: {
+          'p_chat_id': chatId,
+          'p_uid': uid,
+          'p_recent_window': recentWindow,
+        },
+      );
     } catch (_) {
       // Best-effort: read receipts are not safety-critical, so a failed
-      // batch (e.g. transient offline state) should not surface to the UI.
+      // call (e.g. transient offline state) should not surface to the UI.
     }
   }
 
@@ -339,13 +356,15 @@ class ChatService {
     required String uid,
     required bool add,
   }) async {
-    final DocumentReference<Map<String, dynamic>> ref =
-        _messages(chatId).doc(messageId);
-    await ref.update({
-      'reactions.$emoji': add
-          ? FieldValue.arrayUnion([uid])
-          : FieldValue.arrayRemove([uid]),
-    });
+    await _client.rpc(
+      SupabaseRpc.toggleReaction,
+      params: {
+        'p_message_id': messageId,
+        'p_emoji': emoji,
+        'p_uid': uid,
+        'p_add': add,
+      },
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -353,23 +372,32 @@ class ChatService {
   // ---------------------------------------------------------------------
 
   Stream<List<TypingStatusModel>> watchTyping(String chatId, {String? excludeUid}) {
-    return _typing(chatId).snapshots().map((snap) {
-      return snap.docs
-          .map(TypingStatusModel.fromDoc)
-          .where((t) => t.uid != excludeUid && t.isTyping && !t.isStale)
-          .toList();
-    });
+    return _client
+        .from(SupabaseTables.typingStatus)
+        .stream(primaryKey: ['chat_id', 'user_id'])
+        .eq('chat_id', chatId)
+        .map((rows) {
+          return rows
+              .map(TypingStatusModel.fromMap)
+              .where((t) => t.uid != excludeUid && t.isTyping && !t.isStale)
+              .toList();
+        });
   }
 
   Future<void> setTyping(String chatId, String uid, bool isTyping) async {
-    final doc = _typing(chatId).doc(uid);
     if (isTyping) {
-      await doc.set({
-        'isTyping': true,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }).catchError((_) {});
+      await _typing.upsert({
+        'chat_id': chatId,
+        'user_id': uid,
+        'is_typing': true,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'chat_id,user_id').catchError((_) => <Map<String, dynamic>>[]);
     } else {
-      await doc.delete().catchError((_) {});
+      await _typing
+          .delete()
+          .eq('chat_id', chatId)
+          .eq('user_id', uid)
+          .catchError((_) => <Map<String, dynamic>>[]);
     }
   }
 }

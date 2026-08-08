@@ -4,9 +4,9 @@ import '../core/constants/app_constants.dart';
 /// Thin wrapper around [SharedPreferences] for the handful of local,
 /// device-scoped settings the app needs (theme choice, privacy toggles).
 ///
-/// Everything else (profile, chats, messages) lives in Firestore — this is
-/// intentionally only for preferences that should persist even when
-/// offline and don't need to sync across devices.
+/// Everything else (profile, chats, messages) lives in Supabase Postgres —
+/// this is intentionally only for preferences that should persist even
+/// when offline and don't need to sync across devices.
 class LocalStorageService {
   SharedPreferences? _prefs;
 

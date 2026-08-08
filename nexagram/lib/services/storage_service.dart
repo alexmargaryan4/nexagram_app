@@ -1,18 +1,26 @@
+import 'dart:async';
 import 'dart:io';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../core/constants/app_constants.dart';
 import '../core/errors/app_exception.dart';
+import '../supabase_options.dart';
 
 /// Uploads avatars and chat media (images, files, voice notes) to
-/// Firebase Storage and returns their public download URLs.
+/// Supabase Storage and returns their public download URLs.
+///
+/// The whole backend — Auth, database, Storage, and Realtime — now runs
+/// on Supabase; there is no Firebase project involved anywhere in the app.
 ///
 /// All paths are centralised in [StoragePaths] so the bucket layout stays
-/// consistent with the security rules in `docs/storage.rules`.
+/// consistent with the Storage policies configured in the Supabase
+/// dashboard (see `supabase_storage_policy.sql` and README.md).
 class StorageService {
-  StorageService({FirebaseStorage? storage})
-      : _storage = storage ?? FirebaseStorage.instance;
+  StorageService({sb.SupabaseStorageClient? storage})
+      : _storage = storage ?? sb.Supabase.instance.client.storage;
 
-  final FirebaseStorage _storage;
+  final sb.SupabaseStorageClient _storage;
+
+  sb.StorageFileApi get _bucket => _storage.from(SupabaseConfig.bucket);
 
   Future<String> uploadAvatar(String uid, File file) async {
     _assertSize(file, AppConstants.maxImageSizeBytes, 'Avatar');
@@ -69,27 +77,36 @@ class StorageService {
     required String contentType,
   }) async {
     try {
-      final Reference ref = _storage.ref(path);
-      final UploadTask task = ref.putFile(
+      await _bucket.upload(
+        path,
         file,
-        SettableMetadata(contentType: contentType),
+        fileOptions: sb.FileOptions(contentType: contentType, upsert: true),
       );
-      final TaskSnapshot snapshot = await task;
-      return await snapshot.ref.getDownloadURL();
-    } on FirebaseException catch (e) {
-      throw StorageException(
-        e.message ?? 'Upload failed. Please try again.',
-        code: e.code,
-      );
+      return _bucket.getPublicUrl(path);
+    } on sb.StorageException catch (e) {
+      throw StorageException(e.message, code: e.statusCode);
     }
   }
 
+  /// Deletes the object at [downloadUrl]. Accepts a full public URL (as
+  /// returned by the upload methods above) or a bare storage path.
   Future<void> deleteAtUrl(String downloadUrl) async {
     try {
-      await _storage.refFromURL(downloadUrl).delete();
+      final String path = _pathFromUrl(downloadUrl);
+      await _bucket.remove([path]);
     } catch (_) {
       // Best-effort cleanup; a missing/already-deleted object isn't fatal.
     }
+  }
+
+  /// Supabase public URLs look like
+  /// `.../storage/v1/object/public/<bucket>/<path>` — this pulls just the
+  /// `<path>` part back out so it can be passed to `remove()`.
+  String _pathFromUrl(String downloadUrl) {
+    final String marker = '/object/public/${SupabaseConfig.bucket}/';
+    final int index = downloadUrl.indexOf(marker);
+    if (index == -1) return downloadUrl;
+    return Uri.decodeComponent(downloadUrl.substring(index + marker.length));
   }
 
   void _assertSize(File file, int maxBytes, String label) {
@@ -104,18 +121,27 @@ class StorageService {
 
   /// Upload progress stream, useful for showing a progress bar on large
   /// files. Returns (bytesTransferred, totalBytes) pairs.
+  ///
+  /// Note: unlike Firebase's resumable upload task, this reports progress
+  /// via Supabase's onUploadProgress callback and completes the returned
+  /// stream once the upload finishes.
   Stream<(int, int)> uploadWithProgress({
     required String path,
     required File file,
     required String contentType,
   }) {
-    final Reference ref = _storage.ref(path);
-    final UploadTask task = ref.putFile(
-      file,
-      SettableMetadata(contentType: contentType),
-    );
-    return task.snapshotEvents.map(
-      (event) => (event.bytesTransferred, event.totalBytes),
-    );
+    final controller = StreamController<(int, int)>();
+    _bucket
+        .upload(
+          path,
+          file,
+          fileOptions: sb.FileOptions(contentType: contentType, upsert: true),
+          onUploadProgress: (bytesUploaded, bytesTotal) {
+            controller.add((bytesUploaded, bytesTotal));
+          },
+        )
+        .then((_) => controller.close())
+        .catchError((Object e) => controller.addError(e));
+    return controller.stream;
   }
 }
