@@ -3,6 +3,19 @@ import '../core/constants/app_constants.dart';
 import '../core/errors/app_exception.dart';
 import '../models/user_model.dart';
 
+/// Deep link Supabase redirects back to after the user taps the
+/// confirmation link in a sign-up or password-reset email, instead of the
+/// project's default Site URL (which is a bare `http://localhost:...`
+/// placeholder and does nothing useful on a phone).
+///
+/// This scheme/host pair must also be added as a Redirect URL in the
+/// Supabase dashboard (Authentication → URL Configuration), or GoTrue will
+/// silently ignore it and fall back to the Site URL anyway. See
+/// docs/SUPABASE_SETUP.md → "Redirect URLs" for the exact steps, and
+/// AndroidManifest.xml / Info.plist for where this scheme is registered
+/// as a deep link on each platform.
+const String kEmailRedirectTo = 'nexagram://login-callback';
+
 /// Thin wrapper around Supabase Auth (GoTrue) that also provisions the
 /// matching `public.users` profile row on sign-up.
 ///
@@ -87,6 +100,7 @@ class AuthService {
         email: email.trim(),
         password: password,
         data: {'name': name.trim()},
+        emailRedirectTo: kEmailRedirectTo,
       );
       user = response.user;
       if (user == null) {
@@ -169,7 +183,10 @@ class AuthService {
 
   Future<void> sendPasswordResetEmail(String email) async {
     try {
-      await _auth.resetPasswordForEmail(email.trim());
+      await _auth.resetPasswordForEmail(
+        email.trim(),
+        redirectTo: kEmailRedirectTo,
+      );
     } on sb.AuthException catch (e) {
       throw AuthException.fromSupabaseCode(e.code, e.message);
     }
