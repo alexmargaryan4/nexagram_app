@@ -122,25 +122,27 @@ class StorageService {
   /// Upload progress stream, useful for showing a progress bar on large
   /// files. Returns (bytesTransferred, totalBytes) pairs.
   ///
-  /// Note: unlike Firebase's resumable upload task, this reports progress
-  /// via Supabase's onUploadProgress callback and completes the returned
-  /// stream once the upload finishes.
+  /// Note: the installed supabase_flutter version's `upload()` doesn't
+  /// expose a progress callback, so this can only report a single
+  /// (fileSize, fileSize) event once the upload completes rather than
+  /// incremental progress — unlike Firebase's resumable upload task.
   Stream<(int, int)> uploadWithProgress({
     required String path,
     required File file,
     required String contentType,
   }) {
     final controller = StreamController<(int, int)>();
+    final int totalBytes = file.lengthSync();
     _bucket
         .upload(
           path,
           file,
           fileOptions: sb.FileOptions(contentType: contentType, upsert: true),
-          onUploadProgress: (bytesUploaded, bytesTotal) {
-            controller.add((bytesUploaded, bytesTotal));
-          },
         )
-        .then((_) => controller.close())
+        .then((_) {
+          controller.add((totalBytes, totalBytes));
+          controller.close();
+        })
         .catchError((Object e) => controller.addError(e));
     return controller.stream;
   }
