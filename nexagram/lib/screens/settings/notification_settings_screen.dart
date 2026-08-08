@@ -4,11 +4,13 @@ import '../../services/local_storage_service.dart';
 import '../../theme/theme.dart';
 
 /// Toggles the local "notifications enabled" preference used to suppress
-/// foreground local-notification display (see [NotificationService]).
+/// foreground/background local-notification display (see
+/// [NotificationService]).
 ///
-/// Note: this does not unsubscribe the device's FCM token — it only
-/// controls whether NexaGram shows a heads-up banner while the app is
-/// open. Push delivery itself is controlled at the OS level.
+/// Note: this only controls whether NexaGram shows a heads-up banner for
+/// messages it receives over its live Realtime connection — it doesn't
+/// unsubscribe from that connection outright (see
+/// `NotificationService.unregisterToken`, called on sign-out instead).
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
 
