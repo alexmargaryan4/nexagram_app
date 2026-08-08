@@ -18,6 +18,10 @@ class AppDimens {
   static const double radiusLarge = 22;
   static const double radiusPill = 999;
 
+  static const double avatarRadiusSmall = 18;
+  static const double avatarRadiusMedium = 24;
+  static const double avatarRadiusLarge = 44;
+
   static const double chatBubbleMaxWidthFraction = 0.78;
   static const double navBarHeight = 88;
   static const double appBarHeight = 56;
