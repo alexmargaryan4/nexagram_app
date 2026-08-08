@@ -23,6 +23,7 @@ class AppRoutes {
   static const String privacySettings = '/settings/privacy';
   static const String notificationSettings = '/settings/notifications';
   static const String blockedUsers = '/settings/privacy/blocked';
+  static const String groupInfo = '/chats/:chatId/info';
 
   static const String splashName = 'splash';
   static const String loginName = 'login';
@@ -38,7 +39,9 @@ class AppRoutes {
   static const String privacySettingsName = 'privacySettings';
   static const String notificationSettingsName = 'notificationSettings';
   static const String blockedUsersName = 'blockedUsers';
+  static const String groupInfoName = 'groupInfo';
 
   static String chatPath(String chatId) => '/chats/$chatId';
   static String userProfilePath(String uid) => '/user/$uid';
+  static String groupInfoPath(String chatId) => '/chats/$chatId/info';
 }
