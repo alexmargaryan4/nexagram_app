@@ -74,7 +74,7 @@ class AppTypography {
         letterSpacing: 0.1,
       );
 
-  static const TextStyle chatListName = TextStyle(
+  static final TextStyle chatListName = TextStyle(
     fontFamily: _primaryFontFamily,
     fontSize: 17,
     fontWeight: FontWeight.w600,
@@ -88,7 +88,7 @@ class AppTypography {
         color: color,
       );
 
-  static const TextStyle brandLogo = TextStyle(
+  static final TextStyle brandLogo = TextStyle(
     fontFamily: _primaryFontFamily,
     fontSize: 40,
     fontWeight: FontWeight.w700,
