@@ -17,6 +17,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../../services/chat_service.dart';
 import '../../services/user_service.dart';
+import '../../services/voice_recorder_service.dart';
 import '../../theme/theme.dart';
 import '../../widgets/chat/message_bubble.dart';
 import '../../widgets/chat/message_input_bar.dart';
@@ -128,6 +129,7 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _imagePicker = ImagePicker();
   final UserService _userService = UserService();
+  final VoiceRecorderService _voiceRecorder = VoiceRecorderService();
 
   final Map<String, UserModel> _memberCache = {};
 
@@ -156,6 +158,7 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _voiceRecorder.dispose();
     super.dispose();
   }
 
@@ -195,6 +198,32 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
     final String path = result.files.single.path!;
     final String name = result.files.single.name;
     await context.read<ChatProvider>().sendFile(File(path), name);
+  }
+
+  /// Starts a voice-message recording. Returns false (without entering the
+  /// composer's recording UI) if the microphone permission is denied, so
+  /// [MessageInputBar] can silently stay on the text field instead of
+  /// showing a stuck recording indicator.
+  Future<bool> _startVoiceRecording() async {
+    final bool started = await _voiceRecorder.start();
+    if (!started && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Microphone access is needed to record voice messages.'),
+        ),
+      );
+    }
+    return started;
+  }
+
+  Future<void> _cancelVoiceRecording() => _voiceRecorder.cancel();
+
+  Future<void> _finishVoiceRecording() async {
+    final VoiceRecording? recording = await _voiceRecorder.stop();
+    if (recording == null || !mounted) return;
+    await context
+        .read<ChatProvider>()
+        .sendVoice(recording.file, recording.duration.inMilliseconds);
   }
 
   void _showAttachSheet() {
@@ -439,9 +468,9 @@ class _ChatScreenBodyState extends State<_ChatScreenBody> {
             onSendText: provider.sendText,
             onAttachPressed: _showAttachSheet,
             onCameraPressed: () => _pickImage(ImageSource.camera),
-            onStartVoiceRecording: () {},
-            onCancelVoiceRecording: () {},
-            onFinishVoiceRecording: () {},
+            onStartVoiceRecording: _startVoiceRecording,
+            onCancelVoiceRecording: _cancelVoiceRecording,
+            onFinishVoiceRecording: _finishVoiceRecording,
           ),
         ],
       ),
